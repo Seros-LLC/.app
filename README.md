@@ -30,19 +30,35 @@ queue. Confirm it and it shows up under Tasks with the confirmation behind it.
 | `npm run eval` | scores detection against the golden set |
 | `npm run migrate` | applies `migrations/*.sql`, idempotent |
 
-## The model, and its backup
+## The model, and what catches it when it falls
 
-`src/provider/index.ts` is the only place in the codebase that talks to a model.
-One operation, no streaming, no tools, no vendor type escapes the file.
+`src/provider/` is the only place in the codebase that talks to a model, and the only
+thing permitted to open a socket to one. One operation, no streaming, no tools, no
+vendor type escapes the directory. It refuses to run without a meter context, checks
+the budget before the network call, and writes exactly one `action_meter` row on every
+terminating path — `ok`, `timeout`, `invalid_output`, `provider_error`,
+`budget_blocked`.
 
-1. **Primary: local Qwen** — `qwen2.5:7b-instruct` on Ollama at `127.0.0.1:11434`.
-   Bounded call, `temperature 0`, JSON mode, hard timeout.
-2. **Backup: a deterministic fake** — pure code, no network. It runs when Ollama is
-   unreachable, when the call times out, when the JSON is malformed, and when the
-   response fails its Zod schema. Every test and every CI run uses it.
+**The transport chain** is ordered configuration, `SEROS_PROVIDER_CHAIN`:
 
-The app therefore never hangs on a model and never crashes on a bad response; it
-degrades to something dumber and keeps a human in the loop.
+| Setting | Meaning |
+|---|---|
+| `ollama` *(default)* | local Qwen `qwen2.5:7b-instruct`, and nothing behind it |
+| `http,ollama` | a hosted provider first, **local Qwen as the backup** when it fails |
+| `ollama,fake` | accept a regex-grade answer rather than none — a decision, written down |
+
+A chained call is still one metered row, and the provider string records which link
+actually served it: `ollama:qwen2.5:7b-instruct(after:http)`. No vendor has been chosen
+yet (ADR 0004 is still open), so today the chain is Qwen alone; the moment a hosted
+model goes in front, Qwen becomes exactly what it should be — the thing that keeps the
+product working when someone else's API is having an afternoon.
+
+**A failed call invents nothing.** It returns `ok: false, value: null`, the job retries
+with backoff, and the human sees no draft rather than a fabricated one. The
+deterministic fake is a real transport, but it is only ever reached when it is named on
+purpose — `SEROS_PROVIDER=fake` for tests and CI, or written into the chain. Quietly
+fabricating an answer and presenting it as a model result was a review finding, not a
+feature.
 
 Measured on the 122-example golden set (`npm run eval`), which prints a threshold
 sweep so the operating point is chosen from evidence rather than taste:

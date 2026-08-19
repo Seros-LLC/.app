@@ -28,7 +28,7 @@ import type {
 } from './types';
 import { budgetDecision, budgetThresholdLog, dbMeterContext, MICROS_PER_CENT } from './meter';
 import { estimateCostMicros, modelFor, priceTable, TIERS } from './pricing';
-import { callQwen, estimateTokens, fakeComplete, fakeIsConfigured } from './transports';
+import { callQwen, estimateTokens, fakeComplete, fakeIsConfigured, runTransport, transportChain } from './transports';
 import type { TransportResult } from './transports';
 
 export type { CompleteRequest, CompleteResult, MeterContext, MeterOutcome, MeterRow, Purpose, Tier, BudgetSnapshot } from './types';
@@ -144,20 +144,34 @@ export async function complete<T>(
       return settle({ outcome: 'budget_blocked', provider: 'none', value: null });
     }
 
-    // ---- the one socket ----
-    const useFake = fakeIsConfigured();
-    let tr: TransportResult;
-    try {
-      tr = useFake ? fakeComplete(bounded) : await callQwen(bounded, model);
-    } catch (e: any) {
-      const outcome: MeterOutcome = e?.kind === 'timeout' ? 'timeout' : 'provider_error';
+    // ---- the sockets, in order, until one answers ----
+    // Still exactly one metered row: the chain is one logical call, and the
+    // provider string records which link actually served it.
+    const chain = transportChain();
+    let tr: TransportResult | null = null;
+    let lastKind: 'timeout' | 'provider_error' = 'provider_error';
+    let lastError = 'Error';
+    const tried: string[] = [];
+    for (const link of chain) {
+      try {
+        tr = await runTransport(link, bounded, model);
+        if (tried.length) tr = { ...tr, provider: `${tr.provider}(after:${tried.join('+')})` };
+        break;
+      } catch (e: any) {
+        tried.push(link);
+        lastKind = e?.kind === 'timeout' ? 'timeout' : 'provider_error';
+        lastError = e?.constructor?.name ?? 'Error';
+        console.log(JSON.stringify({ level: 'warn', event: 'provider.link_failed', link, error_class: lastError }));
+      }
+    }
+    if (tr === null) {
       return settle({
-        outcome,
-        provider: useFake ? 'fake' : `ollama:${model}`,
+        outcome: lastKind,
+        provider: `none(tried:${tried.join('+') || 'nothing'})`,
         value: null,                       // never a fabricated answer (H2)
         inputTokens: estimateTokens(bounded.system + bounded.user),
         outputTokens: 0,
-        errorClass: e?.constructor?.name ?? 'Error',
+        errorClass: lastError,
       });
     }
 

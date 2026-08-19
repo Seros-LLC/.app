@@ -124,3 +124,78 @@ export function fakeComplete(req: CompleteRequest): TransportResult {
     provider: 'fake',
   };
 }
+
+
+/**
+ * The transport chain: which model is tried, and what catches it when that fails.
+ *
+ * `SEROS_PROVIDER_CHAIN` is an ordered, comma-separated list. The default is
+ * `ollama`, so today local Qwen is the primary and there is no silent second
+ * opinion. When a hosted provider is eventually chosen it goes in front, and Qwen
+ * becomes exactly what it should be: the BACKUP that keeps the product working
+ * when someone else's API is having an afternoon.
+ *
+ *     SEROS_PROVIDER_CHAIN=http,ollama     hosted first, local Qwen catches it
+ *     SEROS_PROVIDER_CHAIN=ollama          local only (default)
+ *     SEROS_PROVIDER_CHAIN=ollama,fake     accept a regex-grade answer over none
+ *
+ * `fake` is never in the chain unless it is written there, because fabricating an
+ * answer and calling it a model result is the defect H2 was raised for. Naming it
+ * explicitly makes it a decision someone took, not something the code did quietly.
+ */
+async function callOpenAiCompatible(req: CompleteRequest, model: string, base: string, key: string): Promise<TransportResult> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), req.timeoutMs ?? Number(process.env.SEROS_TIMEOUT_MS || 20000));
+  try {
+    const r = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST', signal: ctl.signal,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model, temperature: 0, response_format: { type: 'json_object' },
+        max_tokens: req.maxOutputTokens ?? 512,
+        messages: [{ role: 'system', content: req.system }, { role: 'user', content: req.user }],
+      }),
+    });
+    if (!r.ok) { const e: any = new Error(`hosted http ${r.status}`); e.kind = 'provider_error'; throw e; }
+    const j: any = await r.json();
+    const text = j?.choices?.[0]?.message?.content;
+    if (typeof text !== 'string') { const e: any = new Error('hosted returned no content'); e.kind = 'provider_error'; throw e; }
+    return {
+      text, provider: `http:${model}`,
+      inputTokens: j?.usage?.prompt_tokens ?? estimateTokens(req.system + req.user),
+      outputTokens: j?.usage?.completion_tokens ?? estimateTokens(text),
+      cachedInputTokens: j?.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+    };
+  } catch (e: any) {
+    if (e?.name === 'AbortError') { const t2: any = new Error('hosted timeout'); t2.kind = 'timeout'; throw t2; }
+    throw e;
+  } finally { clearTimeout(t); }
+}
+
+export type TransportName = 'http' | 'ollama' | 'fake';
+
+export function transportChain(): TransportName[] {
+  if (fakeIsConfigured()) return ['fake'];
+  const raw = (process.env.SEROS_PROVIDER_CHAIN || 'ollama').split(',')
+    .map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const known = raw.filter((s): s is TransportName => s === 'http' || s === 'ollama' || s === 'fake');
+  return known.length ? known : ['ollama'];
+}
+
+/** A hosted provider adapter. Deliberately unconfigured: no vendor has been chosen. */
+export async function callHttp(req: CompleteRequest, model: string): Promise<TransportResult> {
+  const base = process.env.SEROS_PROVIDER_BASE_URL;
+  const key = process.env.SEROS_PROVIDER_API_KEY;
+  if (!base || !key) {
+    const e: any = new Error('hosted provider is not configured');
+    e.kind = 'provider_error';
+    throw e;
+  }
+  return callOpenAiCompatible(req, model, base, key);
+}
+
+export async function runTransport(name: TransportName, req: CompleteRequest, model: string): Promise<TransportResult> {
+  if (name === 'fake') return fakeComplete(req);
+  if (name === 'http') return callHttp(req, model);
+  return callQwen(req, model);
+}
