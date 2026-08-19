@@ -42,6 +42,7 @@
 
 import { and, eq, inArray, lte, sql } from 'drizzle-orm';
 import type { openDb } from './db/client';
+import { dialect } from './db/client';
 import { WorkspaceScope } from './db/scope';
 import { drafts, jobs, workspaces } from './db/schema';
 import { DAY_MS } from './retention';
@@ -109,23 +110,23 @@ export function maxPendingDrafts(opts: LimitOptions = {}): number {
 // counting (per workspace, always scoped — invariant 20/22)
 // ---------------------------------------------------------------------------
 
-function countRows(db: Db, where: ReturnType<typeof and>, table: typeof jobs | typeof drafts): number {
+async function countRows(db: Db, where: ReturnType<typeof and>, table: typeof jobs | typeof drafts): Promise<number> {
   const row = table === jobs
-    ? db.select({ n: sql<number>`count(*)` }).from(jobs).where(where).get()
-    : db.select({ n: sql<number>`count(*)` }).from(drafts).where(where).get();
+    ? (await db.select({ n: sql<number>`count(*)` }).from(jobs).where(where).limit(1))[0]
+    : (await db.select({ n: sql<number>`count(*)` }).from(drafts).where(where).limit(1))[0];
   return Number(row?.n ?? 0);
 }
 
-export function queuedJobCount(db: Db, workspaceId: string): number {
-  const scope = WorkspaceScope.open(db, workspaceId);
+export async function queuedJobCount(db: Db, workspaceId: string): Promise<number> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
   return countRows(db, and(
     eq(jobs.workspaceId, scope.workspaceId),
     eq(jobs.status, 'queued'),
   ), jobs);
 }
 
-export function pendingDraftCount(db: Db, workspaceId: string): number {
-  const scope = WorkspaceScope.open(db, workspaceId);
+export async function pendingDraftCount(db: Db, workspaceId: string): Promise<number> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
   return countRows(db, and(
     eq(drafts.workspaceId, scope.workspaceId),
     eq(drafts.state, 'pending'),
@@ -147,12 +148,12 @@ export interface LimitCounts {
  * Report the caps before they bite. Read-only: it writes nothing, audits nothing, and
  * is safe to call from a dashboard or a health check on any schedule.
  */
-export function workspaceLimitCounts(db: Db, workspaceId: string, opts: LimitOptions = {}): LimitCounts {
-  const scope = WorkspaceScope.open(db, workspaceId);
+export async function workspaceLimitCounts(db: Db, workspaceId: string, opts: LimitOptions = {}): Promise<LimitCounts> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
   const now = opts.now ?? Date.now();
   const counts: Record<LimitKind, number> = {
-    queued_jobs: queuedJobCount(db, scope.workspaceId),
-    pending_drafts: pendingDraftCount(db, scope.workspaceId),
+    queued_jobs: await queuedJobCount(db, scope.workspaceId),
+    pending_drafts: await pendingDraftCount(db, scope.workspaceId),
   };
   const limits: Record<LimitKind, number> = {
     queued_jobs: maxQueuedJobs(opts),
@@ -167,9 +168,11 @@ export function workspaceLimitCounts(db: Db, workspaceId: string, opts: LimitOpt
 }
 
 /** Every workspace, one row each. The only cross-tenant path here: counts, never content. */
-export function allWorkspaceLimitCounts(db: Db, opts: LimitOptions = {}): LimitCounts[] {
-  return db.select({ id: workspaces.id }).from(workspaces).all()
-    .map((r) => workspaceLimitCounts(db, r.id, opts));
+export async function allWorkspaceLimitCounts(db: Db, opts: LimitOptions = {}): Promise<LimitCounts[]> {
+  const ids = (await db.select({ id: workspaces.id }).from(workspaces)).map((r) => r.id);
+  const out: LimitCounts[] = [];
+  for (const id of ids) out.push(await workspaceLimitCounts(db, id, opts));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,11 +213,11 @@ const REASON: Record<LimitKind, LimitRefused['reason']> = {
   pending_drafts: 'pending_drafts_limit',
 };
 
-function refuse(scope: WorkspaceScope, kind: LimitKind, count: number, limit: number,
-                now: number, shouldAudit: boolean): LimitRefused {
+async function refuse(scope: WorkspaceScope, kind: LimitKind, count: number, limit: number,
+                      now: number, shouldAudit: boolean): Promise<LimitRefused> {
   if (shouldAudit) {
     // outcome `denied`: the request was refused, on purpose, and we say so. Counts only.
-    scope.audit('limit.refused', 'denied', {
+    await scope.audit('limit.refused', 'denied', {
       limit_kind: kind, reason: REASON[kind], count, limit, at: now,
     });
   }
@@ -227,26 +230,26 @@ function refuse(scope: WorkspaceScope, kind: LimitKind, count: number, limit: nu
 }
 
 /** M3: refuse to queue more work once the queue is at its cap. Never drops a row. */
-export function checkQueuedJobs(db: Db, workspaceId: string, opts: LimitOptions = {}): LimitDecision {
-  const scope = WorkspaceScope.open(db, workspaceId);
+export async function checkQueuedJobs(db: Db, workspaceId: string, opts: LimitOptions = {}): Promise<LimitDecision> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
   const now = opts.now ?? Date.now();
   const limit = maxQueuedJobs(opts);
-  const count = queuedJobCount(db, scope.workspaceId);
-  if (count >= limit) return refuse(scope, 'queued_jobs', count, limit, now, opts.audit !== false);
+  const count = await queuedJobCount(db, scope.workspaceId);
+  if (count >= limit) return await refuse(scope, 'queued_jobs', count, limit, now, opts.audit !== false);
   return { ok: true, workspaceId: scope.workspaceId, kind: 'queued_jobs', count, limit, at: now };
 }
 
 /** M3: refuse to create more drafts once the confirm queue is at its cap. */
-export function checkPendingDrafts(db: Db, workspaceId: string, opts: LimitOptions = {}): LimitDecision {
-  const scope = WorkspaceScope.open(db, workspaceId);
+export async function checkPendingDrafts(db: Db, workspaceId: string, opts: LimitOptions = {}): Promise<LimitDecision> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
   const now = opts.now ?? Date.now();
   const limit = maxPendingDrafts(opts);
-  const count = pendingDraftCount(db, scope.workspaceId);
-  if (count >= limit) return refuse(scope, 'pending_drafts', count, limit, now, opts.audit !== false);
+  const count = await pendingDraftCount(db, scope.workspaceId);
+  if (count >= limit) return await refuse(scope, 'pending_drafts', count, limit, now, opts.audit !== false);
   return { ok: true, workspaceId: scope.workspaceId, kind: 'pending_drafts', count, limit, at: now };
 }
 
-const CHECKS: Record<LimitKind, (db: Db, workspaceId: string, opts: LimitOptions) => LimitDecision> = {
+const CHECKS: Record<LimitKind, (db: Db, workspaceId: string, opts: LimitOptions) => Promise<LimitDecision>> = {
   queued_jobs: checkQueuedJobs,
   pending_drafts: checkPendingDrafts,
 };
@@ -260,13 +263,13 @@ const CHECKS: Record<LimitKind, (db: Db, workspaceId: string, opts: LimitOptions
  * Returns the FIRST refusal (queue depth first, then draft backlog), or an allowance.
  * Refusals are audited with outcome `denied`; allowances write nothing.
  */
-export function enforceLimits(db: Db, workspaceId: string, opts: LimitOptions = {}): LimitDecision {
-  const scope = WorkspaceScope.open(db, workspaceId);
+export async function enforceLimits(db: Db, workspaceId: string, opts: LimitOptions = {}): Promise<LimitDecision> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
   const now = opts.now ?? Date.now();
   const kinds = opts.kinds ?? LIMIT_KINDS;
   let last: LimitDecision = { ok: true, workspaceId: scope.workspaceId, kind: null, count: 0, limit: 0, at: now };
   for (const kind of kinds) {
-    const decision = CHECKS[kind](db, scope.workspaceId, { ...opts, now });
+    const decision = await CHECKS[kind](db, scope.workspaceId, { ...opts, now });
     if (!decision.ok) return decision;
     last = decision;
   }
@@ -280,7 +283,17 @@ export function enforceLimits(db: Db, workspaceId: string, opts: LimitOptions = 
 type ColumnInfo = { name: string };
 
 /** See note (b): true once someone adds the column the brief asks for. */
-export function draftsHaveExpiresAt(db: Db): boolean {
+export async function draftsHaveExpiresAt(db: Db): Promise<boolean> {
+  if (dialect() === 'pg') {
+    // PRAGMA is a syntax error on Postgres, not an empty answer: ask the catalogue
+    // the same question instead. current_schema() keeps it inside whatever schema
+    // this deployment's search_path points at (PGSCHEMA), like every other query here.
+    const res: any = await (db as any).execute(sql`
+      SELECT column_name FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'drafts' AND column_name = 'expires_at'`);
+    const rows: any[] = res?.rows ?? res ?? [];
+    return rows.length > 0;
+  }
   const cols = db.all(sql`PRAGMA table_info(drafts)`) as unknown as ColumnInfo[];
   return cols.some((c) => c.name === 'expires_at');
 }
@@ -311,34 +324,34 @@ export interface ExpiryResult {
  * Idempotent: the second run finds nothing pending past the cutoff, changes no rows,
  * and writes no audit row.
  */
-export function expireDrafts(db: Db, workspaceId: string, opts: LimitOptions = {}): ExpiryResult {
-  const scope = WorkspaceScope.open(db, workspaceId);   // throws UnknownWorkspace
+export async function expireDrafts(db: Db, workspaceId: string, opts: LimitOptions = {}): Promise<ExpiryResult> {
+  const scope = await WorkspaceScope.open(db, workspaceId);   // throws UnknownWorkspace
   const now = opts.now ?? Date.now();
   const ttlDays = draftTtlDays(opts);
   const ttlMs = ttlDays * DAY_MS;
   const cutoffAt = now - ttlMs;
 
   // A per-draft `expires_at` wins where it exists; otherwise created_at + TTL. Note (b).
-  const pastWindow = draftsHaveExpiresAt(db)
+  const pastWindow = (await draftsHaveExpiresAt(db))
     ? sql`COALESCE(${sql.raw('expires_at')}, ${drafts.createdAt} + ${ttlMs}) <= ${now}`
     : lte(drafts.createdAt, cutoffAt);
 
-  const expired = db.update(drafts).set({ state: 'expired' })
+  const expired = (await db.update(drafts).set({ state: 'expired' })
     .where(and(
       eq(drafts.workspaceId, scope.workspaceId),   // tenancy: always scoped
       eq(drafts.state, 'pending'),                 // idempotency + §1.5 transition rule
       pastWindow,
     ))
     .returning({ id: drafts.id })
-    .all()
+    )
     .map((r) => r.id);
 
-  const pendingRemaining = pendingDraftCount(db, scope.workspaceId);
+  const pendingRemaining = await pendingDraftCount(db, scope.workspaceId);
 
   if (expired.length > 0) {
     const sample = expired.slice(0, AUDIT_ID_SAMPLE);
     // Counts and ids only. Never a title, an outcome, an owner or a due date.
-    scope.audit('draft.expired', 'ok', {
+    await scope.audit('draft.expired', 'ok', {
       ttl_days: ttlDays,
       cutoff_at: cutoffAt,
       expired_at: now,
@@ -359,27 +372,29 @@ export function expireDrafts(db: Db, workspaceId: string, opts: LimitOptions = {
 }
 
 /** The scheduled job: every workspace, one pass. */
-export function expireDraftsAllWorkspaces(db: Db, opts: LimitOptions = {}): ExpiryResult[] {
-  const ids = db.select({ id: workspaces.id }).from(workspaces).all().map((r) => r.id);
-  return ids.map((id) => expireDrafts(db, id, opts));
+export async function expireDraftsAllWorkspaces(db: Db, opts: LimitOptions = {}): Promise<ExpiryResult[]> {
+  const ids = (await db.select({ id: workspaces.id }).from(workspaces)).map((r) => r.id);
+  const out: ExpiryResult[] = [];
+  for (const id of ids) out.push(await expireDrafts(db, id, opts));
+  return out;
 }
 
 /**
  * Convenience for the maintenance loop: expire first (which frees pending-draft
  * headroom), then report where every workspace stands against its caps.
  */
-export function runMaintenance(db: Db, opts: LimitOptions = {}): {
+export async function runMaintenance(db: Db, opts: LimitOptions = {}): Promise<{
   expired: ExpiryResult[];
   counts: LimitCounts[];
-} {
-  const expired = expireDraftsAllWorkspaces(db, opts);
-  return { expired, counts: allWorkspaceLimitCounts(db, opts) };
+}> {
+  const expired = await expireDraftsAllWorkspaces(db, opts);
+  return { expired, counts: await allWorkspaceLimitCounts(db, opts) };
 }
 
 /** Jobs already queued for a workspace, ids only — used by the CLI and by tests. */
-export function queuedJobIds(db: Db, workspaceId: string, statuses: readonly ('queued' | 'running')[] = ['queued']): string[] {
-  const scope = WorkspaceScope.open(db, workspaceId);
-  return db.select({ id: jobs.id }).from(jobs)
+export async function queuedJobIds(db: Db, workspaceId: string, statuses: readonly ('queued' | 'running')[] = ['queued']): Promise<string[]> {
+  const scope = await WorkspaceScope.open(db, workspaceId);
+  return (await db.select({ id: jobs.id }).from(jobs)
     .where(and(eq(jobs.workspaceId, scope.workspaceId), inArray(jobs.status, [...statuses])))
-    .all().map((r) => r.id);
+    ).map((r) => r.id);
 }

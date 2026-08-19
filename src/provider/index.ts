@@ -66,10 +66,10 @@ export async function complete<T>(
   };
 
   let recorded = false;
-  const before = budgetDecision(meter.budget());
+  const before = budgetDecision(await meter.budget());
 
   /** Writes exactly one meter row and returns the result in the same step. */
-  const settle = (o: {
+  const settle = async (o: {
     outcome: MeterOutcome;
     provider: string;
     value: T | null;
@@ -77,7 +77,7 @@ export async function complete<T>(
     outputTokens?: number;
     cachedInputTokens?: number;
     errorClass?: string;
-  }): CompleteResult<T> => {
+  }): Promise<CompleteResult<T>> => {
     if (recorded) throw new Error('provider.complete: refusing to meter one call twice');
     recorded = true;
     const inputTokens = Math.max(0, Math.round(o.inputTokens ?? 0));
@@ -106,11 +106,11 @@ export async function complete<T>(
       refId: req.refId ?? null,
       billableAction: o.outcome !== 'budget_blocked',
     };
-    const meterId = meter.record(row);
+    const meterId = await meter.record(row);
 
     // 50% record / 80% alert, computed from the spend this call just added.
     const after = budgetDecision({
-      ...meter.budget(),
+      ...(await meter.budget()),
     });
     budgetThresholdLog(meter.workspaceId, before, after);
 
@@ -141,7 +141,7 @@ export async function complete<T>(
         level: 'warn', event: 'budget.blocked', workspace_id: meter.workspaceId,
         cap: before.cap, purpose: req.purpose, tier: req.tier,
       }));
-      return settle({ outcome: 'budget_blocked', provider: 'none', value: null });
+      return await settle({ outcome: 'budget_blocked', provider: 'none', value: null });
     }
 
     // ---- the sockets, in order, until one answers ----
@@ -165,7 +165,7 @@ export async function complete<T>(
       }
     }
     if (tr === null) {
-      return settle({
+      return await settle({
         outcome: lastKind,
         provider: `none(tried:${tried.join('+') || 'nothing'})`,
         value: null,                       // never a fabricated answer (H2)
@@ -180,7 +180,7 @@ export async function complete<T>(
     try {
       parsed = JSON.parse(tr.text);
     } catch {
-      return settle({
+      return await settle({
         outcome: 'invalid_output', provider: tr.provider, value: null,
         inputTokens: tr.inputTokens, outputTokens: tr.outputTokens,
         cachedInputTokens: tr.cachedInputTokens, errorClass: 'InvalidOutput',
@@ -188,13 +188,13 @@ export async function complete<T>(
     }
     const check = schema.safeParse(parsed);
     if (!check.success) {
-      return settle({
+      return await settle({
         outcome: 'invalid_output', provider: tr.provider, value: null,
         inputTokens: tr.inputTokens, outputTokens: tr.outputTokens,
         cachedInputTokens: tr.cachedInputTokens, errorClass: 'InvalidOutput',
       });
     }
-    return settle({
+    return await settle({
       outcome: 'ok', provider: tr.provider, value: check.data,
       inputTokens: tr.inputTokens, outputTokens: tr.outputTokens,
       cachedInputTokens: tr.cachedInputTokens,
@@ -202,7 +202,7 @@ export async function complete<T>(
   } catch (e: any) {
     // Nothing may leave this function unmetered.
     if (!recorded) {
-      return settle({
+      return await settle({
         outcome: 'provider_error',
         provider: fakeIsConfigured() ? 'fake' : `ollama:${model}`,
         value: null,

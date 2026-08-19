@@ -1,0 +1,7 @@
+.seros/seros.db
+.seros/seros.db-*
+*.log
+tests/
+evals/
+spikes/
+REVIEW.md

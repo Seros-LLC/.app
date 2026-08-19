@@ -1,11 +1,22 @@
 /**
- * Session and CSRF. Deliberately small: a signed cookie, no session store, no
- * password yet. What it does buy is that a confirmation is now attributable to a
- * member who proved they hold a session, and that a form POST cannot be driven
- * from another origin.
+ * Session, CSRF, rate limiting - and, since 0006_auth, what a session MEANS.
+ *
+ * A session is still a signed cookie with no server-side store, but it now says
+ * three more things:
+ *   - `sid`: a fresh random session id, minted on every sign-in and on every
+ *     password change. A cookie that existed before the sign-in is never carried
+ *     forward, so a fixated cookie value is not the value the victim ends up with.
+ *   - `pv`:  the password version (the member's password_set_at). requireSession
+ *     compares it with the stored one, so changing a password logs out every other
+ *     session that was issued against the old password - the part of "rotation"
+ *     that a stateless cookie cannot get from a new id alone.
+ *   - the CSRF token is bound to the session id as well as the member, so a token
+ *     minted for a pre-rotation session is refused after rotation.
  */
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
+import { openDb } from './db/client';
+import { MemberCredentials } from './password';
 
 export const sessionSecret = () => {
   const s = process.env.SEROS_SESSION_SECRET;
@@ -13,7 +24,15 @@ export const sessionSecret = () => {
   return s;
 };
 
-export type Session = { workspaceId: string; memberId: string; issuedAt: number };
+export type Session = {
+  workspaceId: string;
+  memberId: string;
+  issuedAt: number;
+  /** Random per sign-in. Absent only on a cookie issued before 0006_auth. */
+  sid?: string;
+  /** The member's password_set_at at the moment this session was issued (0 = none). */
+  pv?: number;
+};
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 function seal(s: Session): string {
@@ -51,6 +70,25 @@ export function setSession(res: Response, s: Session) {
     `seros_session=${encodeURIComponent(seal(s))}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${MAX_AGE_MS / 1000}` +
     (process.env.NODE_ENV === 'production' ? '; Secure' : ''));
 }
+
+/** 128 bits of session id. Never derived from anything the caller sent. */
+export const newSessionId = () => crypto.randomBytes(16).toString('base64url');
+
+/**
+ * Issue a NEW session and hand it to the browser: a new id, a new issue time and
+ * therefore a new CSRF token. Called on sign-in, on redeeming an invite and on a
+ * password change - never anywhere that merely reads an existing session, so no
+ * cookie a caller already holds is ever upgraded in place. Returns the session it
+ * wrote, because the caller usually needs the CSRF token for the next page.
+ */
+export function startSession(res: Response, who: { workspaceId: string; memberId: string; pv?: number }): Session {
+  const s: Session = {
+    workspaceId: who.workspaceId, memberId: who.memberId,
+    issuedAt: Date.now(), sid: newSessionId(), pv: who.pv ?? 0,
+  };
+  setSession(res, s);
+  return s;
+}
 export function clearSession(res: Response) {
   res.setHeader('Set-Cookie', 'seros_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
 }
@@ -59,10 +97,14 @@ export function currentSession(req: Request): Session | null {
   return unseal(readCookie(req, 'seros_session'));
 }
 
-/** CSRF token bound to the session, so it cannot be minted by a third party. */
+/**
+ * CSRF token bound to the session, so it cannot be minted by a third party - and
+ * to the session ID, so a token minted before a rotation dies with the session
+ * that minted it.
+ */
 export function csrfToken(s: Session): string {
   return crypto.createHmac('sha256', sessionSecret())
-    .update(`csrf:${s.workspaceId}:${s.memberId}:${s.issuedAt}`).digest('base64url');
+    .update(`csrf:${s.workspaceId}:${s.memberId}:${s.issuedAt}:${s.sid ?? ''}`).digest('base64url');
 }
 export function csrfOk(s: Session, given: unknown): boolean {
   const expect = Buffer.from(csrfToken(s));
@@ -75,9 +117,42 @@ declare global {
   namespace Express { interface Request { session?: Session } }
 }
 
+/**
+ * One connection for the session check rather than one per request. Keyed by the
+ * database path so a test that points SEROS_DB somewhere else still gets its own.
+ */
+let authDbCache: { key: string; db: ReturnType<typeof openDb> } | null = null;
+function authDb() {
+  const key = process.env.SEROS_DB ?? '';
+  if (!authDbCache || authDbCache.key !== key) authDbCache = { key, db: openDb() };
+  return authDbCache.db;
+}
+
+/**
+ * Is this cookie still speaking for the credential it was issued against?
+ * Fails CLOSED: if the credential cannot be read at all, the session is refused
+ * rather than trusted.
+ */
+export function sessionPasswordCurrent(s: Session): boolean {
+  try {
+    const creds = MemberCredentials.for(authDb(), { workspaceId: s.workspaceId });
+    return creds.passwordVersion(s.memberId) === (s.pv ?? 0);
+  } catch (err) {
+    console.log(JSON.stringify({ level: 'warn', event: 'session.check_failed', error: String((err as any)?.message ?? err) }));
+    return false;
+  }
+}
+
 export function requireSession(req: Request, res: Response, next: NextFunction) {
   const s = currentSession(req);
   if (!s) return res.redirect(303, '/login');
+  // A session issued before the current password is not a session any more: this is
+  // what makes a password change end every other sign-in, including a stolen one.
+  if (!sessionPasswordCurrent(s)) {
+    console.log(JSON.stringify({ level: 'warn', event: 'session.superseded' }));
+    clearSession(res);
+    return res.redirect(303, '/login');
+  }
   req.session = s;
   next();
 }
@@ -93,8 +168,21 @@ export function requireCsrf(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+/*
+ * There is NO password-less sign-in path. There was one, gated on NODE_ENV and an
+ * env switch, so that a workspace nobody had provisioned yet could still be
+ * reached; it was removed deliberately. An authentication story that depends on a
+ * deployment getting NODE_ENV right is not an authentication story, and the way in
+ * to an unprovisioned workspace is `npm run seed`, `npm run set-password` or
+ * `npm run invite` - all of which need a shell on the host, which is the point.
+ * The only thing that turns a request into a session is src/routes/login.ts
+ * verifying a scrypt record. Do not add a second one.
+ */
+
 /** Crude but real: a fixed-window limiter, per IP, per bucket. */
 const buckets = new Map<string, { n: number; resetAt: number }>();
+/** Test support only: no route reaches this, and it clears counters rather than raising them. */
+export function resetRateLimits() { buckets.clear(); }
 export function rateLimit(name: string, max: number, windowMs: number) {
   return (req: Request, res: Response, next: NextFunction) => {
     const key = `${name}:${req.ip}`;

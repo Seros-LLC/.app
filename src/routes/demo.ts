@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { page, esc } from '../views';
+import { pageCtx } from './queue';
 
 import { csrfToken } from '../auth';
 
@@ -28,7 +29,7 @@ export function demoPage(req: Request, res: Response) {
   </form>
   <div class="card"><p class="meta">Try one of these</p>
     <ul>${SAMPLES.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
-  res.type('html').send(page('Demo', '/demo', body));
+  res.type('html').send(page('Demo', '/demo', body, pageCtx(req, WorkspaceScope.open(openDb(), req.session!.workspaceId))));
 }
 
 export function demoPost(req: Request, res: Response) {

@@ -16,23 +16,32 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/seed.ts",
     "check:tenancy": "tsx tools/check-tenancy.ts",
-    "verify": "npm run typecheck && npm run check:tenancy && npm test"
+    "verify": "npm run typecheck && npm run check:tenancy && npm test",
+    "build:vercel": "mkdir -p public && node -e \"require('fs').writeFileSync('public/.keep','')\"",
+    "set-password": "tsx src/auth-cli.ts set-password",
+    "invite": "tsx src/auth-cli.ts invite",
+    "auth": "tsx src/auth-cli.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/pg": "^8.23.1",
     "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "nodemon": "^3.1.14",
+    "pg": "^8.23.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "zod": "^4.4.3",
-    "drizzle-orm": "^0.45.2"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.2.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

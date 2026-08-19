@@ -11,7 +11,8 @@ import { join, relative } from 'node:path';
 
 const ROOT = join(__dirname, '..');
 const TENANT_TABLES = [
-  'members', 'sourceMessages', 'drafts', 'confirmations', 'tasks', 'auditEvents', 'actionMeter', 'jobs',
+  'members', 'memberCredentials', 'sourceMessages', 'drafts', 'confirmations', 'tasks',
+  'auditEvents', 'actionMeter', 'jobs',
 ];
 
 /** Files that are allowed to name a tenant table, and why. */
@@ -19,6 +20,7 @@ const ALLOWED = new Map<string, string>([
   ['src/db/scope.ts', 'the scope itself: the one legitimate door'],
   ['src/db/system.ts', 'the queue poller: the single audited cross-tenant path'],
   ['src/db/schema.ts', 'the declarations'],
+  ['src/password.ts', 'the credential store: MemberCredentials cannot be constructed without a workspace scope and injects the workspace id into every statement, exactly as WorkspaceScope does'],
   ['src/retention.ts', 'the sweeper: deletes across tables by design, opens a scope first'],
   ['src/limits.ts', 'growth limits and draft expiry: opens a scope first'],
   ['src/provider/meter.ts', 'the meter writer itself: it is the authority for action_meter, and it is constructed per workspace via dbMeterContext(db, workspaceId)'],

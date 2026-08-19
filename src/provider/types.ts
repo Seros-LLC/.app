@@ -88,11 +88,17 @@ export interface BudgetSnapshot {
  * workspace being spent for, can read that workspace's budget, and can write
  * exactly one ActionMeter row.
  */
+/**
+ * PORTABILITY: both members may answer synchronously OR with a promise, and
+ * `complete()` awaits them either way. The database-backed context
+ * (`dbMeterContext`) is asynchronous because node-postgres is; an in-memory or
+ * test context can stay synchronous, so the existing contract is unbroken.
+ */
 export interface MeterContext {
   readonly workspaceId: string;
-  budget(): BudgetSnapshot;
+  budget(): BudgetSnapshot | Promise<BudgetSnapshot>;
   /** Writes ONE ActionMeter row and returns its id. */
-  record(row: MeterRow): number;
+  record(row: MeterRow): number | Promise<number>;
 }
 
 export class ProviderTimeout extends Error { readonly kind = 'timeout' as const; }

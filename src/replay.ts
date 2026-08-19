@@ -16,6 +16,7 @@ import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 import { eq, lte, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
 import type { openDb } from './db/client';
+import { affectedRows } from './db/client';
 
 type Db = ReturnType<typeof openDb>;
 
@@ -62,16 +63,15 @@ function sameHash(a: string, b: string): boolean {
  * Cheap (single indexed range delete on expires_at) and idempotent: running it
  * twice, or never, changes nothing but the row count. Returns rows removed.
  */
-export function pruneReplayNonces(db: Db, now: number = Date.now()): number {
-  const res = db.delete(webhookReplayNonces)
-    .where(lte(webhookReplayNonces.expiresAt, now))
-    .run();
-  return Number((res as { changes?: number }).changes ?? 0);
+export async function pruneReplayNonces(db: Db, now: number = Date.now()): Promise<number> {
+  const res = await db.delete(webhookReplayNonces)
+    .where(lte(webhookReplayNonces.expiresAt, now));
+  return affectedRows(res);
 }
 
 /** Rows currently held. Test/ops helper — proves the store stays bounded. */
-export function replayNonceCount(db: Db): number {
-  const row = db.select({ n: sql<number>`count(*)` }).from(webhookReplayNonces).get();
+export async function replayNonceCount(db: Db): Promise<number> {
+  const row = (await db.select({ n: sql<number>`count(*)` }).from(webhookReplayNonces).limit(1))[0];
   return Number(row?.n ?? 0);
 }
 
@@ -82,19 +82,19 @@ export function replayNonceCount(db: Db): number {
  * (401 or 409) WITHOUT processing the body.
  *
  * Wire it into the webhook in one line, after signature verification succeeds:
- *   if (!checkAndRecordReplay(db, sig, tsNum).fresh) return res.status(409)...
+ *   if (!(await checkAndRecordReplay(db, sig, tsNum)).fresh) return res.status(409)...
  *
  * @param db            an open drizzle handle (openDb())
  * @param signature     the exact signature header value (e.g. 'v0=<hex>')
  * @param timestampSec  the signed request timestamp, in epoch SECONDS
  * @param now           epoch millis, injectable for tests
  */
-export function checkAndRecordReplay(
+export async function checkAndRecordReplay(
   db: Db,
   signature: string,
   timestampSec: number,
   now: number = Date.now(),
-): ReplayCheck {
+): Promise<ReplayCheck> {
   const windowMs = REPLAY_WINDOW_SEC * 1000;
   const expiresAt = now + windowMs;
 
@@ -107,26 +107,26 @@ export function checkAndRecordReplay(
 
   // Opportunistic prune first: keeps the table bounded by the window, not by
   // traffic, and makes a long-expired nonce reusable exactly once again.
-  pruneReplayNonces(db, now);
+  await pruneReplayNonces(db, now);
 
   const signatureHash = hashSignature(signature);
 
   // Atomic claim: the PRIMARY KEY decides the race, not a read-then-write.
-  const res = db.insert(webhookReplayNonces).values({
+  const res = await db.insert(webhookReplayNonces).values({
     signatureHash,
     requestTs: Math.trunc(timestampSec),
     seenAt: now,
     expiresAt,
-  }).onConflictDoNothing().run();
+  }).onConflictDoNothing();
 
-  if (Number((res as { changes?: number }).changes ?? 0) === 1) {
+  if (affectedRows(res) === 1) {
     return { fresh: true, expiresAt };
   }
 
   // Lost the claim: a live nonce already holds this signature. Confirm it in
   // constant time over the fixed-length hashes before refusing.
-  const existing = db.select().from(webhookReplayNonces)
-    .where(eq(webhookReplayNonces.signatureHash, signatureHash)).get();
+  const existing = (await db.select().from(webhookReplayNonces)
+    .where(eq(webhookReplayNonces.signatureHash, signatureHash)).limit(1))[0];
 
   if (existing && sameHash(existing.signatureHash, signatureHash)) {
     return { fresh: false, reason: 'replayed_signature', expiresAt: existing.expiresAt };

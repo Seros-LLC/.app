@@ -13,7 +13,7 @@ then write anything anywhere.
 
 ```bash
 npm install
-npm run migrate          # creates seros.db
+npm run migrate          # creates .seros/seros.db
 npm start                # web app on http://localhost:3000
 npm run worker           # background worker, in a second terminal
 ```
@@ -28,7 +28,7 @@ queue. Confirm it and it shows up under Tasks with the confirmation behind it.
 | `npm test` | full test suite, offline, no keys |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run eval` | scores detection against the golden set |
-| `npm run migrate` | applies `migrations/*.sql`, idempotent |
+| `npm run migrate` | applies `.seros/migrations/*.sql`, idempotent |
 | `npm run check:tenancy` | fails if any module reaches past `WorkspaceScope` |
 | `npm run verify` | typecheck, tenancy check, and the full suite |
 
@@ -128,7 +128,8 @@ src/
     system.ts          the single cross-tenant path (the queue poller)
     client.ts          connection + migrations
   routes/              webhook, queue, confirm, demo
-migrations/*.sql       idempotent, applied in order
+.seros/
+  migrations/*.sql       idempotent, applied in order
 evals/                 golden set + precision/recall scorer
 tests/                 node:test, offline
 ```
@@ -171,9 +172,25 @@ dropped. An expired draft can never become a confirmed one: expiry only moves
 
 ## Not done yet
 
-* **Sign-in has no password.** A session is required for everything and a confirmation
-  is attributable to the member who held it, but anyone who can reach the page can pick
-  a member from a list. Real authentication is the next thing that matters.
+* **Sign-in is a real password now** — the hole this section used to describe is closed.
+  `/login` takes an email address or a member id **and a password**; there is no member
+  list on the page and no path that issues a session without verifying a credential.
+  Passwords are stored as `scrypt$N$r$p$<salt>$<hash>` (`node:crypto` only, per-user salt,
+  parameters carried in the record so they can be raised later), compared with
+  `crypto.timingSafeEqual`, and an unknown address costs the same time as a wrong
+  password and gets the same sentence, so the form cannot be used to enumerate members.
+  Five failures lock an account for fifteen minutes (`SEROS_LOGIN_MAX_ATTEMPTS`,
+  `SEROS_LOGIN_LOCKOUT_MS`); a lockout answers exactly like any other failure and the
+  real reason goes to the audit log. A credential is created by an admin issuing a
+  **single-use invite** (`npm run invite -- <memberId>`, or the button on `/members`):
+  the raw token is shown once, only its SHA-256 is stored, it expires in 24 hours
+  (`SEROS_INVITE_TTL_MS`), and redeeming it at `/set-password` spends it. You change your
+  own at `/password`, which requires the current one and rotates your session so every
+  other session — including a stolen one — stops working. `npm run seed` creates the demo
+  members with generated passwords and prints them once; `npm run set-password` and
+  `npm run auth -- unlock|status` are the operator tools. Still missing: invites are
+  handed over by the admin rather than emailed, there is no self-service reset for
+  someone who has forgotten their password, and there is no second factor or SSO.
 * The tracker writer is a local fake; no Slack or Jira/Linear client exists yet, so the
   `slack_action` confirmation surface named in ADR 0002 does not exist either.
 * SQLite, single process. The schema is Postgres-shaped and expected to move.

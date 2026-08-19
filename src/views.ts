@@ -36,19 +36,93 @@ td{padding:9px 6px;border-bottom:1px solid var(--line)}
 .pill{display:inline-block;font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;
   border:1px solid var(--line);border-radius:20px;padding:2px 9px;color:var(--steel)}
 .pill.ok{border-color:var(--seros);color:var(--seros)}
-footer{margin:50px 0 40px;color:var(--steel);font-size:.76rem}
-@media(max-width:720px){.grid{grid-template-columns:1fr}}
+footer{margin:50px 0 40px;color:var(--steel);font-size:.76rem;border-top:1px solid var(--line);padding-top:16px}
+
+/* signed-in identity and sign out */
+.who{display:flex;align-items:center;gap:12px;margin-left:20px}
+.whoami{font-size:.76rem;letter-spacing:.06em;text-transform:uppercase;color:var(--steel)}
+.whoami::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--seros);margin-right:7px;vertical-align:middle}
+button.linkish{border:0;background:none;padding:0;color:var(--steel);text-transform:uppercase;
+  font-size:.72rem;letter-spacing:.08em;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+button.linkish:hover{color:var(--seros)}
+
+/* the one line telling you what just happened */
+.flashbar{background:#eef0fb;border-bottom:1px solid var(--line)}
+.flash{margin:0;padding:11px 0;font-size:.82rem;color:var(--seros)}
+.flash::before{content:'\\2713';margin-right:9px;font-weight:700}
+
+/* keyboard users are users */
+.skip{position:absolute;left:-9999px;top:0;background:var(--seros);color:#fff;padding:10px 16px;z-index:10}
+.skip:focus{left:0}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{
+  outline:2px solid var(--seros);outline-offset:2px;border-radius:2px}
+input:disabled,button:disabled{opacity:.55;cursor:not-allowed}
+.menu{display:none}
+
+/* readable text, and a table that does not overflow a phone */
+.prose{max-width:62ch}
+.tablewrap{overflow-x:auto}
+code{background:#eae3d8;padding:1px 5px;border-radius:2px;font-size:.86em}
+
+@media(max-width:760px){
+  .grid{grid-template-columns:1fr}
+  header .wrap{height:auto;padding-top:10px;padding-bottom:10px;flex-wrap:wrap;gap:6px}
+  nav{order:3;width:100%;display:flex;gap:14px;overflow-x:auto;padding-bottom:4px}
+  nav a{margin-left:0;white-space:nowrap}
+  .who{margin-left:auto}
+  h1{font-size:1.55rem}
+  .card{padding:14px}
+  input[type=text],input[type=date]{width:100%}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `;
 
-export function page(title: string, active: string, body: string): string {
-  const nav = (href: string, label: string) =>
-    `<a href="${href}"${active === href ? ' class="on"' : ''}>${label}</a>`;
+export interface PageContext {
+  /** Who is signed in, if anyone. Absent renders the signed-out header. */
+  member?: { id: string; name: string; role: string } | undefined;
+  csrf?: string | undefined;
+  /** A one-line confirmation of what just happened. */
+  flash?: string | undefined;
+}
+
+const NAV: [string, string][] = [
+  ['/queue', 'Queue'],
+  ['/tasks', 'Tasks'],
+  ['/ask', 'Ask'],
+  ['/digest', 'Digest'],
+  ['/members', 'Members'],
+  ['/audit', 'Audit'],
+  ['/demo', 'Demo'],
+];
+
+export function page(title: string, active: string, body: string, ctx: PageContext = {}): string {
+  const nav = NAV.map(([href, label]) =>
+    `<a href="${href}"${active === href ? ' class="on" aria-current="page"' : ''}>${label}</a>`).join('');
+
+  const who = ctx.member
+    ? `<div class="who"><span class="whoami" title="${esc(ctx.member.role)}">${esc(ctx.member.name)}</span>` +
+      (ctx.csrf
+        ? `<form method="post" action="/logout"><input type="hidden" name="csrf" value="${esc(ctx.csrf)}">` +
+          `<button class="linkish" type="submit">Sign out</button></form>`
+        : '') +
+      `</div>`
+    : '';
+
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex,nofollow">
 <title>${esc(title)} — Seros</title><style>${CSS}</style></head><body>
-<header><div class="wrap"><a class="brand" href="/">Seros</a><nav>
-${nav('/queue', 'Queue')}${nav('/tasks', 'Tasks')}${nav('/audit', 'Audit')}${nav('/demo', 'Demo')}
-</nav></div></header><main class="wrap">${body}</main>
+<a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap">
+  <a class="brand" href="/">Seros</a>
+  <button class="menu" type="button" aria-label="Menu" onclick="void 0">&#9776;</button>
+  <nav>${nav}</nav>
+  ${who}
+</div></header>
+${ctx.flash ? `<div class="flashbar"><div class="wrap"><p class="flash">${esc(ctx.flash)}</p></div></div>` : ''}
+<main class="wrap" id="main">${body}</main>
 <footer class="wrap">Human confirmation is required before any write. Seros, LLC.</footer>
 </body></html>`;
 }

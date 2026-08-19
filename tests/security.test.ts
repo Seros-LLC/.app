@@ -8,6 +8,8 @@ process.env.SEROS_PROVIDER = 'fake';
 process.env.SEROS_SIGNING_SECRET = 'sec-test-signing-secret-long';
 process.env.SEROS_SESSION_SECRET = 'sec-test-session-secret-long';
 process.env.SEROS_WORKSPACE = 'sec';
+process.env.SEROS_ALLOW_PASSWORDLESS = '0';   // there is no password-less path left to disable
+process.env.SEROS_SCRYPT_N = '4096';          // real scrypt, small enough for a suite that signs in often
 const dir = mkdtempSync(join(tmpdir(), 'seros-sec-'));
 process.env.SEROS_DB = join(dir, 'sec.db');
 
@@ -18,6 +20,7 @@ import { sign } from '../src/routes/webhook';
 import { tick } from '../src/worker';
 import { claimNextJob } from '../src/db/system';
 import { tasks, confirmations } from '../src/db/schema';
+import { MemberCredentials, hashPasswordSync } from '../src/password';
 import { eq } from 'drizzle-orm';
 
 migrateDb();
@@ -25,6 +28,15 @@ const db = openDb();
 const scope = WorkspaceScope.ensure(db, 'sec', 'Security workspace');
 scope.addMember('u-owner', 'Owner', 'owner');
 scope.addMember('u-viewer', 'Viewer', 'viewer');
+
+// A session costs a secret now. These two are the only members with one, and the
+// password is what login() proves below; nothing else in this file changes.
+const PASSWORDS: Record<string, string> = {
+  'u-owner': 'owner-password-for-the-security-suite',
+  'u-viewer': 'viewer-password-for-the-security-suite',
+};
+const credentials = MemberCredentials.for(db, scope);
+for (const [id, pw] of Object.entries(PASSWORDS)) credentials.setPassword(id, hashPasswordSync(pw));
 
 const server = createApp().listen(0);
 const port = (server.address() as any).port;
@@ -34,8 +46,9 @@ async function login(memberId: string): Promise<string> {
   const r = await fetch(url('/login'), {
     method: 'POST', redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ memberId }).toString(),
+    body: new URLSearchParams({ identifier: memberId, password: PASSWORDS[memberId] ?? '' }).toString(),
   });
+  assert.equal(r.status, 303, `sign-in for ${memberId} was refused`);
   const c = r.headers.get('set-cookie') ?? '';
   return c.split(';')[0]!;
 }

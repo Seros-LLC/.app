@@ -3,7 +3,7 @@
   "migrate": {
     "table": "__drizzle_migrations__",
     "schema": "public",
-    "dir": "./migrations"
+    "dir": "./.seros/migrations"
   },
   "entries": [
     {

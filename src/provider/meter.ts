@@ -44,34 +44,34 @@ export function dbMeterContext(db: Db, workspaceId: string, now: () => number = 
   }
   return {
     workspaceId,
-    budget(): BudgetSnapshot {
-      const ws = db.select({
+    async budget(): Promise<BudgetSnapshot> {
+      const ws = (await db.select({
         daily: workspaces.dailyBudgetCents,
         monthly: workspaces.monthlyBudgetCents,
-      }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+      }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
       if (!ws) throw new UnknownBudgetWorkspace(workspaceId);
       const t = now();
       const day = startOfUtcDay(t);
       const month = startOfUtcMonth(t);
-      const sumFrom = (since: number, scoped: boolean) => {
+      const sumFrom = async (since: number, scoped: boolean) => {
         const where = scoped
           ? and(eq(actionMeter.workspaceId, workspaceId), gte(actionMeter.at, since))
           : gte(actionMeter.at, since);
-        const r = db.select({ total: sql<number>`coalesce(sum(${actionMeter.estimatedCostMicros}), 0)` })
-          .from(actionMeter).where(where).get();
+        const r = (await db.select({ total: sql<number>`coalesce(sum(${actionMeter.estimatedCostMicros}), 0)` })
+          .from(actionMeter).where(where).limit(1))[0];
         return Number(r?.total ?? 0);
       };
       return {
         dailyBudgetCents: Number(ws.daily ?? 0),
         monthlyBudgetCents: Number(ws.monthly ?? 0),
-        spentTodayMicros: sumFrom(day, true),
-        spentMonthMicros: sumFrom(month, true),
+        spentTodayMicros: await sumFrom(day, true),
+        spentMonthMicros: await sumFrom(month, true),
         globalDailyBudgetCents: globalDailyBudgetCents(),
-        spentGlobalTodayMicros: globalDailyBudgetCents() > 0 ? sumFrom(day, false) : 0,
+        spentGlobalTodayMicros: globalDailyBudgetCents() > 0 ? await sumFrom(day, false) : 0,
       };
     },
-    record(row: MeterRow): number {
-      const inserted = db.insert(actionMeter).values({
+    async record(row: MeterRow): Promise<number> {
+      const inserted = (await db.insert(actionMeter).values({
         workspaceId: row.workspaceId,
         purpose: row.purpose,
         outcome: row.outcome,
@@ -89,7 +89,7 @@ export function dbMeterContext(db: Db, workspaceId: string, now: () => number = 
         refType: row.refType,
         refId: row.refId,
         billableAction: row.billableAction ? 1 : 0,
-      }).returning({ id: actionMeter.id }).get();
+      }).returning({ id: actionMeter.id }))[0];
       return Number(inserted?.id ?? 0);
     },
   };

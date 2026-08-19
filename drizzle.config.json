@@ -2,10 +2,10 @@
   "schema": "./src/db/schema.ts",
   "dialect": "sqlite",
   "migrations": {
-    "folder": "./migrations",
+    "folder": "./.seros/migrations",
     "pack": false
   },
   "dbCredentials": {
-    "url": "seros.db"
+    "url": "./.seros/seros.db"
   }
 }
