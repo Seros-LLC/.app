@@ -46,3 +46,23 @@ export function retryJob(db: Db, job: JobRow, maxAttempts = 5) {
 export function listWorkspaces(db: Db) {
   return db.select().from(workspaces).all();
 }
+
+
+/**
+ * M4: a job claimed by a worker that then died stayed `running` for ever, and the
+ * confirmed write behind it never happened. Anything running longer than the lease
+ * is assumed orphaned and returned to the queue, where the ordinary bounded retry
+ * and dead-letter rules apply. Returning it is safe because every handler is
+ * idempotent: the tracker write is conditional on its own state.
+ */
+export function reapStaleJobs(db: Db, leaseMs = Number(process.env.SEROS_JOB_LEASE_MS || 120_000), now = Date.now()): number {
+  const rows = db.all(sql`
+    UPDATE jobs SET status = 'queued'
+    WHERE status = 'running' AND run_at <= ${now - leaseMs}
+    RETURNING id
+  `) as any[];
+  if (rows.length) {
+    console.log(JSON.stringify({ level: 'warn', event: 'jobs.reaped', count: rows.length }));
+  }
+  return rows.length;
+}

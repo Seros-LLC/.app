@@ -155,6 +155,15 @@ export class WorkspaceScope {
     }
 
     if (edits && decision === 'confirmed_with_edits') {
+      // What the human changed is the training signal for routing later, so record
+      // WHICH fields moved. The values themselves are content and stay out of audit.
+      const changed = [
+        edits.title !== undefined && edits.title !== d.title ? 'title' : null,
+        edits.outcome !== undefined && edits.outcome !== d.outcome ? 'outcome' : null,
+        (edits.suggestedOwner ?? null) !== (d.suggestedOwner ?? null) ? 'owner' : null,
+        (edits.suggestedDueDate ?? null) !== (d.suggestedDueDate ?? null) ? 'due_date' : null,
+      ].filter(Boolean) as string[];
+      this.audit('draft.edited', 'ok', { draft_id: draftId, edited_fields: changed.join(','), edited_count: changed.length });
       this.db.update(drafts).set({
         title: edits.title ?? d.title, outcome: edits.outcome ?? d.outcome,
         suggestedOwner: edits.suggestedOwner ?? d.suggestedOwner,

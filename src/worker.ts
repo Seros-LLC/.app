@@ -1,5 +1,5 @@
 import { openDb, migrateDb } from './db/client';
-import { claimNextJob, finishJob, retryJob } from './db/system';
+import { claimNextJob, finishJob, retryJob, reapStaleJobs } from './db/system';
 import { WorkspaceScope } from './db/scope';
 import { complete, dbMeterContext, DetectionSchema, DraftSchema } from './provider/index';
 import { and, eq } from 'drizzle-orm';
@@ -7,7 +7,16 @@ import { confirmations, drafts, tasks, members } from './db/schema';
 import { sanitizeDueDate, resolveOwner } from './sanitize';
 import { DETECT_SYSTEM, draftSystem } from './prompts';
 
-const detectThreshold = () => Number(process.env.SEROS_DETECT_THRESHOLD || 55);
+const detectThreshold = () => {
+  const raw = process.env.SEROS_DETECT_THRESHOLD;
+  if (raw === undefined || raw === '') return 55;
+  const n = Number(raw);
+  // `confidence < NaN` is always false, so a typo here silently accepted everything.
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    throw new Error(`SEROS_DETECT_THRESHOLD must be a number 0-100, got ${JSON.stringify(raw)}`);
+  }
+  return n;
+};
 
 
 async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, messageId: string) {
@@ -100,10 +109,12 @@ async function main() {
   migrateDb();
   const db = openDb();
   console.log(JSON.stringify({ level: 'info', event: 'worker.started' }));
+  let lastReap = 0;
   // The loop is the thing that must not die. A job may fail; the worker may not.
   for (;;) {
     let did = false;
     try {
+      if (Date.now() - lastReap > 30_000) { reapStaleJobs(db); lastReap = Date.now(); }
       did = await tick(db);
     } catch (e: any) {
       console.error(JSON.stringify({ level: 'error', event: 'worker.tick_failed', error: String(e?.message ?? e) }));

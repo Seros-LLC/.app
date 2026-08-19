@@ -74,7 +74,15 @@ async function main() {
   console.log(`  precision     ${(precision * 100).toFixed(1)}%`);
   console.log(`  recall        ${(recall * 100).toFixed(1)}%`);
   console.log(`  f1            ${(f1 * 100).toFixed(1)}%`);
-  if (wrong.length) { console.log(''); for (const w of wrong) console.log('  ' + w); }
+  // M14: the corpus is synthetic, but printing it by default is still a habit worth
+  // not having, since the same harness will one day be pointed at a consented corpus.
+  if (wrong.length) {
+    if (process.env.SEROS_EVAL_SHOW_TEXT === '1') {
+      console.log(''); for (const w of wrong) console.log('  ' + w);
+    } else {
+      console.log(`\n  ${wrong.length} misclassified. Re-run with SEROS_EVAL_SHOW_TEXT=1 to see them.`);
+    }
+  }
   console.log('');
 }
 main();
