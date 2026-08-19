@@ -147,17 +147,27 @@ test('INVARIANT: a task cannot exist without a confirmation', async () => {
   assert.equal(all[0]!.confirmationId, (r as any).confirmationId);
 });
 
-test('confirm is single-shot; a second confirm is refused', async () => {
+test('confirm is idempotent for the same member, and a task is never created twice', async () => {
   const s = WorkspaceScope.ensure(db, 'T-once');
   s.addMember('u-me', 'Me');
+  s.addMember('u-other', 'Other');
   const { row } = s.ingestMessage({ channelId: 'C1', ts: '555.5', authorId: 'u-ana', body: "I'll review the PR by Monday." });
   s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) {}
   const draft = s.pendingDrafts()[0]!;
-  const first = s.confirm(draft.id, 'confirmed', 'u-me');
-  const second = s.confirm(draft.id, 'confirmed', 'u-me');
+
+  const first: any = s.confirm(draft.id, 'confirmed', 'u-me');
+  const again: any = s.confirm(draft.id, 'confirmed', 'u-me');
   assert.equal(first.ok, true);
-  assert.equal(second.ok, false);
+  assert.equal(again.ok, true, 'the same person asking twice gets the same answer, not an error');
+  assert.equal(again.replayed, true);
+  assert.equal(again.confirmationId, first.confirmationId);
+
+  // and somebody else cannot overwrite a decision that has already been made
+  const other = s.confirm(draft.id, 'rejected', 'u-other');
+  assert.equal(other.ok, false);
+  assert.equal((other as any).reason, 'already_confirmed');
+
   assert.equal(db.select().from(tasks).where(eq(tasks.workspaceId, 'T-once')).all().length, 1);
 });
 

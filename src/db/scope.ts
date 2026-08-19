@@ -161,15 +161,25 @@ export class WorkspaceScope {
           memberId: string, edits?: { title?: string; outcome?: string; suggestedOwner?: string | null; suggestedDueDate?: string | null }) {
     const d = this.draft(draftId);
     if (!d) return { ok: false as const, reason: 'not_found' };
+
+    // Checked BEFORE the pending test: after the first confirmation the draft is no
+    // longer pending, and a double-click must still get the same answer (brief 1.6).
+    const prior = this.db.select().from(confirmations).where(and(
+      eq(confirmations.workspaceId, this.workspaceId), eq(confirmations.draftId, draftId))).get();
+    if (prior) {
+      if (prior.memberId !== memberId) return { ok: false as const, reason: 'already_confirmed' };
+      const t = this.db.select().from(tasks).where(and(
+        eq(tasks.workspaceId, this.workspaceId), eq(tasks.confirmationId, prior.id))).get();
+      return { ok: true as const, confirmationId: prior.id, taskId: t?.id ?? null, replayed: true as const };
+    }
+
     if (d.state !== 'pending') return { ok: false as const, reason: 'not_pending' };
 
     const member = this.db.select().from(members).where(and(
       eq(members.workspaceId, this.workspaceId), eq(members.id, memberId))).get();
     if (!member || member.status !== 'active') return { ok: false as const, reason: 'no_such_member' };
 
-    const already = this.db.select().from(confirmations).where(and(
-      eq(confirmations.workspaceId, this.workspaceId), eq(confirmations.draftId, draftId))).get();
-    if (already) return { ok: false as const, reason: 'already_confirmed' };
+
 
     const confirmationId = randomUUID();
     try {

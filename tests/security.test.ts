@@ -172,6 +172,35 @@ test('CRITICAL 2: two claimants never receive the same job', () => {
   assert.equal(b, null);
 });
 
+test('L2: a decision that is neither confirm nor reject is rejected, not treated as confirm', async () => {
+  const draftId = await makeDraft();
+  const cookie = await login('u-owner');
+  const csrf = await tokenFrom(cookie);
+  const r = await fetch(url('/confirm'), {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+    body: new URLSearchParams({ draftId, decision: 'banana', csrf }).toString(),
+  });
+  assert.equal(r.status, 400);
+  assert.equal(db.select().from(confirmations).where(eq(confirmations.draftId, draftId)).all().length, 0);
+});
+
+test('L1: the same person confirming twice gets the same confirmation, not an error', async () => {
+  const draftId = await makeDraft();
+  const cookie = await login('u-owner');
+  const csrf = await tokenFrom(cookie);
+  const body = new URLSearchParams({ draftId, decision: 'confirm', csrf }).toString();
+  const headers = { 'content-type': 'application/x-www-form-urlencoded', cookie };
+  const first = await fetch(url('/confirm'), { method: 'POST', redirect: 'manual', headers, body });
+  const second = await fetch(url('/confirm'), { method: 'POST', redirect: 'manual', headers, body });
+  assert.equal(first.status, 303);
+  assert.equal(second.status, 303);                        // a double-click is not an error
+  assert.match(second.headers.get('location')!, /Already%20confirmed/);
+  assert.equal(db.select().from(confirmations).where(eq(confirmations.draftId, draftId)).all().length, 1);
+  assert.equal(db.select().from(tasks).where(eq(tasks.workspaceId, 'sec')).all()
+    .filter((t) => t.confirmationId === db.select().from(confirmations).where(eq(confirmations.draftId, draftId)).get()!.id).length, 1);
+});
+
 test('the rate limiter actually blocks a flood', async () => {
   let blocked = 0;
   for (let i = 0; i < 30; i++) {

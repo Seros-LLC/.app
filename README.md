@@ -171,7 +171,19 @@ dropped. An expired draft can never become a confirmed one: expiry only moves
 
 ## Not done yet
 
-* **No authentication.** Anyone who can reach the app can confirm as the demo member.
-  This is a demo-grade hole and must close before anything real touches it.
-* The tracker writer is a local fake; no Slack or Jira/Linear client exists yet.
+* **Sign-in has no password.** A session is required for everything and a confirmation
+  is attributable to the member who held it, but anyone who can reach the page can pick
+  a member from a list. Real authentication is the next thing that matters.
+* The tracker writer is a local fake; no Slack or Jira/Linear client exists yet, so the
+  `slack_action` confirmation surface named in ADR 0002 does not exist either.
 * SQLite, single process. The schema is Postgres-shaped and expected to move.
+* No vendor model is chosen (ADR 0004 is still open); the chain is local Qwen alone
+  until one is, at which point Qwen becomes the fallback behind it.
+
+## Review status
+
+`REVIEW.md` is an adversarial review of this codebase, where every critical finding was
+reproduced with a real request rather than described. Current state: **5 of 5 critical,
+7 of 7 high and 14 of 14 medium findings closed**, each with a test that fails if the
+fix is removed. Of the lows, L1–L4 and L6 are closed; L5 (the `slack_action` surface)
+is a feature that does not exist yet rather than a defect.
