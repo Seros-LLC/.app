@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { checkAndRecordReplay } from '../replay';
+import { enforceLimits } from '../limits';
 
 /** No default. A signing secret that ships in the source is not a signing secret. */
 export const secret = () => {
@@ -77,6 +78,13 @@ export async function webhookHandler(req: Request, res: Response) {
     console.log(JSON.stringify({ level: 'warn', event: 'webhook.unknown_workspace', workspace: workspaceId }));
     return res.status(404).json({ ok: false, error: 'unknown_workspace' });
   }
+  // A tenant at its backlog cap is refused loudly rather than quietly dropped.
+  const lim = enforceLimits(db, workspaceId);
+  if (!lim.ok) {
+    console.log(JSON.stringify({ level: 'warn', event: 'webhook.at_limit', workspace: workspaceId, kind: lim.kind }));
+    return res.status(lim.suggestedStatus).json({ ok: false, error: lim.reason, count: lim.count, limit: lim.limit });
+  }
+
   const { row, created } = scope.ingestMessage({ channelId, ts, authorId, body: text });
   if (created) scope.enqueue('detect', { messageId: row.id });
   console.log(JSON.stringify({ level: 'info', event: 'webhook.accepted', workspace: workspaceId, message_id: row.id, deduped: !created }));

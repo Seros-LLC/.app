@@ -2,8 +2,6 @@ import type { Request, Response } from 'express';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { page, esc } from '../views';
-import { and, desc, eq } from 'drizzle-orm';
-import { auditEvents, confirmations, drafts, tasks } from '../db/schema';
 
 import { csrfToken } from '../auth';
 
@@ -52,15 +50,7 @@ export function queuePage(req: Request, res: Response) {
 export function tasksPage(req: Request, res: Response) {
   const db = openDb();
   const scope = WorkspaceScope.open(db, req.session!.workspaceId);
-  const rows = db.select({
-      id: tasks.id, writeState: tasks.writeState, createdAt: tasks.createdAt,
-      title: drafts.title, owner: drafts.suggestedOwner, due: drafts.suggestedDueDate,
-      memberId: confirmations.memberId,
-    }).from(tasks)
-    .innerJoin(confirmations, and(eq(confirmations.workspaceId, tasks.workspaceId), eq(confirmations.id, tasks.confirmationId)))
-    .innerJoin(drafts, and(eq(drafts.workspaceId, confirmations.workspaceId), eq(drafts.id, confirmations.draftId)))
-    .where(eq(tasks.workspaceId, scope.workspaceId))
-    .orderBy(desc(tasks.createdAt)).all();
+  const rows = scope.taskRows();
 
   const body = `<h1>Tasks</h1>
   <p class="sub">Every row here has a confirmation behind it. There is no other way for one to exist.</p>
@@ -76,9 +66,7 @@ export function tasksPage(req: Request, res: Response) {
 export function auditPage(req: Request, res: Response) {
   const db = openDb();
   const scope = WorkspaceScope.open(db, req.session!.workspaceId);
-  const rows = db.select().from(auditEvents)
-    .where(eq(auditEvents.workspaceId, scope.workspaceId))
-    .orderBy(desc(auditEvents.id)).limit(100).all();
+  const rows = scope.auditRows();
   const body = `<h1>Audit log</h1>
   <p class="sub">Append-only. Identifiers only — no message content ever reaches this table.</p>
   ${rows.length === 0 ? '<div class="empty">Nothing recorded yet.</div>' : `<table>

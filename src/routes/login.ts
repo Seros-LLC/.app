@@ -3,14 +3,12 @@ import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { setSession, clearSession } from '../auth';
 import { page, esc } from '../views';
-import { members } from '../db/schema';
-import { eq } from 'drizzle-orm';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
 
 export function loginPage(_req: Request, res: Response) {
   const db = openDb();
-  const roster = db.select().from(members).where(eq(members.workspaceId, WS())).all();
+  const roster = WorkspaceScope.ensure(db, WS()).rosterWithRoles();
   const body = `<h1>Sign in</h1>
   <p class="sub">There is no password yet, and that is a known hole — but a confirmation is
   now attributable to whoever holds this session, and nothing can be confirmed without one.</p>

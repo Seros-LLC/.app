@@ -1,9 +1,8 @@
 import { openDb, migrateDb } from './db/client';
 import { claimNextJob, finishJob, retryJob, reapStaleJobs } from './db/system';
+import { enforceLimits, runMaintenance } from './limits';
 import { WorkspaceScope } from './db/scope';
 import { complete, dbMeterContext, DetectionSchema, DraftSchema } from './provider/index';
-import { and, eq } from 'drizzle-orm';
-import { confirmations, drafts, tasks, members } from './db/schema';
 import { sanitizeDueDate, resolveOwner } from './sanitize';
 import { DETECT_SYSTEM, draftSystem } from './prompts';
 
@@ -47,12 +46,16 @@ async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, 
     scope.audit('draft.unavailable', 'failed', { message_id: messageId, outcome: dr.outcome });
     throw new Error(`draft unavailable: ${dr.outcome}`);
   }
-  const roster = db.select({ id: members.id, name: members.name }).from(members)
-    .where(eq(members.workspaceId, workspaceId)).all();
-  const owner = resolveOwner(dr.value.proposedOwner, msg.authorId, roster);
+  const owner = resolveOwner(dr.value.proposedOwner, msg.authorId, scope.roster());
   const due = sanitizeDueDate(body, dr.value.dueDate);
   if (due === null && dr.value.dueDate !== null) {
     scope.audit('draft.due_date_dropped', 'ok', { message_id: msg.id });
+  }
+
+  const cap = enforceLimits(db, workspaceId, { kinds: ['pending_drafts'] });
+  if (!cap.ok) {
+    scope.audit('draft.skipped_at_limit', 'denied', { count: cap.count, limit: cap.limit });
+    return;
   }
 
   scope.createDraft({
@@ -69,25 +72,16 @@ async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, 
 
 /** The fake tracker. Idempotent on the confirmation id. */
 function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: string, confirmationId: string) {
-  const conf = db.select().from(confirmations)
-    .where(and(eq(confirmations.workspaceId, workspaceId), eq(confirmations.id, confirmationId))).get();
-  if (!conf) throw new Error('no confirmation: refusing to write');   // ADR 0002
-  if (conf.decision === 'rejected') return;
-  const task = db.select().from(tasks)
-    .where(and(eq(tasks.workspaceId, workspaceId), eq(tasks.confirmationId, confirmationId))).get();
-  if (!task) throw new Error('no task row');
-  if (task.writeState === 'created') return;                          // already written
-  const d = db.select().from(drafts)
-    .where(and(eq(drafts.workspaceId, workspaceId), eq(drafts.id, conf.draftId))).get();
-  // Conditional on the state we read: if another worker got there first, this
-  // updates zero rows and we do not write, meter or audit a second time.
-  const res: any = db.update(tasks).set({ writeState: 'created', threadReplyState: 'posted' })
-    .where(and(eq(tasks.workspaceId, workspaceId), eq(tasks.id, task.id),
-               eq(tasks.writeState, 'queued'))).run();
-  if (res?.changes === 0) return;
-  WorkspaceScope.open(db, workspaceId).audit('task.created', 'ok',
-    { task_id: task.id, confirmation_id: confirmationId, idempotency_key: task.idempotencyKey });
-  console.log(JSON.stringify({ level: 'info', event: 'tracker.write', task_id: task.id, title_len: (d?.title ?? '').length }));
+  const scope = WorkspaceScope.open(db, workspaceId);
+  const job = scope.writeJob(confirmationId);
+  if (!job) throw new Error('no confirmation: refusing to write');   // ADR 0002
+  if (job.conf.decision === 'rejected') return;
+  if (!job.task) throw new Error('no task row');
+  if (job.task.writeState === 'created') return;                     // already written
+  if (!scope.markTaskCreated(job.task.id)) return;                   // another worker won
+  scope.audit('task.created', 'ok',
+    { task_id: job.task.id, confirmation_id: confirmationId, idempotency_key: job.task.idempotencyKey });
+  console.log(JSON.stringify({ level: 'info', event: 'tracker.write', task_id: job.task.id, title_len: (job.draft?.title ?? '').length }));
 }
 
 export async function tick(db: ReturnType<typeof openDb>): Promise<boolean> {
@@ -110,11 +104,13 @@ async function main() {
   const db = openDb();
   console.log(JSON.stringify({ level: 'info', event: 'worker.started' }));
   let lastReap = 0;
+  let lastMaint = 0;
   // The loop is the thing that must not die. A job may fail; the worker may not.
   for (;;) {
     let did = false;
     try {
       if (Date.now() - lastReap > 30_000) { reapStaleJobs(db); lastReap = Date.now(); }
+      if (Date.now() - lastMaint > 60_000) { runMaintenance(db); lastMaint = Date.now(); }
       did = await tick(db);
     } catch (e: any) {
       console.error(JSON.stringify({ level: 'error', event: 'worker.tick_failed', error: String(e?.message ?? e) }));

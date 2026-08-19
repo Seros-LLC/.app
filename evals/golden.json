@@ -486,5 +486,385 @@
  {
   "text": "We're hoping to have the report ready by the end of the month.",
   "label": false
+ },
+ {
+  "text": "I'll commit to reviewing the bug reports by tomorrow morning.",
+  "label": true
+ },
+ {
+  "text": "I'll prioritize the server migration for the upcoming week.",
+  "label": true
+ },
+ {
+  "text": "I'll send over the Q4 financial projections by the end of the day.",
+  "label": true
+ },
+ {
+  "text": "I'll follow up with the client on their query by this afternoon.",
+  "label": true
+ },
+ {
+  "text": "I'll ensure the design changes are implemented by the end of next week.",
+  "label": true
+ },
+ {
+  "text": "I'll prepare the presentation for the product launch by Friday.",
+  "label": true
+ },
+ {
+  "text": "I'll update the marketing strategy by next Tuesday.",
+  "label": true
+ },
+ {
+  "text": "I'll finalize the budget for the new project by the end of the week.",
+  "label": true
+ },
+ {
+  "text": "I'll make sure the UI tweaks are done by the release date.",
+  "label": true
+ },
+ {
+  "text": "I'll review the code and provide feedback by the deadline.",
+  "label": true
+ },
+ {
+  "text": "I'll handle the customer complaint by the end of today.",
+  "label": true
+ },
+ {
+  "text": "I'll schedule the team meeting for next Thursday.",
+  "label": true
+ },
+ {
+  "text": "I'll update the project timeline by the middle of this week.",
+  "label": true
+ },
+ {
+  "text": "I'll look into the invoice discrepancies and get back to you by the end of the day.",
+  "label": true
+ },
+ {
+  "text": "I'll coordinate with the vendor to ensure the shipment arrives on time.",
+  "label": true
+ },
+ {
+  "text": "I'll send the design brief to the team by the start of the week.",
+  "label": true
+ },
+ {
+  "text": "I'll finalize the contract terms by the end of the month.",
+  "label": true
+ },
+ {
+  "text": "I'll prepare the user manual for the new software by next Friday.",
+  "label": true
+ },
+ {
+  "text": "I'll follow up on the order status by the end of the week.",
+  "label": true
+ },
+ {
+  "text": "I'll work on the email template redesign by the end of the day.",
+  "label": true
+ },
+ {
+  "text": "I'll complete the database migration by the end of the week.",
+  "label": true
+ },
+ {
+  "text": "I'll review the sales reports and share insights by tomorrow.",
+  "label": true
+ },
+ {
+  "text": "I'll schedule the office renovation with the contractor by next week.",
+  "label": true
+ },
+ {
+  "text": "I'll make sure the webinar recording is edited and shared by next Monday.",
+  "label": true
+ },
+ {
+  "text": "I'll update the product specifications by the end of the week.",
+  "label": true
+ },
+ {
+  "text": "I'll handle the payment disputes and get back to you by the end of today.",
+  "label": true
+ },
+ {
+  "text": "I'll do my best to manage that project starting next week.",
+  "label": true
+ },
+ {
+  "text": "Great, I'll take on that task then.",
+  "label": true
+ },
+ {
+  "text": "I can start on those proposals right away.",
+  "label": true
+ },
+ {
+  "text": "Definitely, I'll get started on that update.",
+  "label": true
+ },
+ {
+  "text": "Alright, I'll take this one on and finish it up.",
+  "label": true
+ },
+ {
+  "text": "I'll get right on that presentation and get it to you by the deadline.",
+  "label": true
+ },
+ {
+  "text": "Got it, I'll work on those client emails this afternoon.",
+  "label": true
+ },
+ {
+  "text": "I'm on it. I'll get those graphs done for you.",
+  "label": true
+ },
+ {
+  "text": "Sounds good, I'll make sure to get back to you by tomorrow.",
+  "label": true
+ },
+ {
+  "text": "No problem, I'll handle that request this afternoon.",
+  "label": true
+ },
+ {
+  "text": "Got you, I'll update the database with the new info.",
+  "label": true
+ },
+ {
+  "text": "Will do, I'll tackle those client meetings this week.",
+  "label": true
+ },
+ {
+  "text": "Alright, I'll start preparing for that meeting.",
+  "label": true
+ },
+ {
+  "text": "I'll get to work on that right away.",
+  "label": true
+ },
+ {
+  "text": "I'll get started on that task now.",
+  "label": true
+ },
+ {
+  "text": "Got it, I'll take care of those client questions today.",
+  "label": true
+ },
+ {
+  "text": "I'll handle those invoices and send them out this afternoon.",
+  "label": true
+ },
+ {
+  "text": "Will do, I'll get started on those updates first thing tomorrow.",
+  "label": true
+ },
+ {
+  "text": "Got it, I'll start on that analysis right away.",
+  "label": true
+ },
+ {
+  "text": "I'll get to work on those reports as soon as possible.",
+  "label": true
+ },
+ {
+  "text": "I'll get started on that immediately.",
+  "label": true
+ },
+ {
+  "text": "Project X is 45% complete.",
+  "label": false
+ },
+ {
+  "text": "Sales for Q3 hit $2.5M.",
+  "label": false
+ },
+ {
+  "text": "Just deployed the new CRM updates.",
+  "label": false
+ },
+ {
+  "text": "Database migration is 75% finished.",
+  "label": false
+ },
+ {
+  "text": "Announcing Q4 goals now available.",
+  "label": false
+ },
+ {
+  "text": "Thank you to the marketing team for their hard work.",
+  "label": false
+ },
+ {
+  "text": "Server uptime is 99.98% this month.",
+  "label": false
+ },
+ {
+  "text": "Product Y is on track for launch in 2 weeks.",
+  "label": false
+ },
+ {
+  "text": "Thanks to all for the quick feedback.",
+  "label": false
+ },
+ {
+  "text": "User onboarding is up 20% this quarter.",
+  "label": false
+ },
+ {
+  "text": "Infrastructure improvements have reduced downtime.",
+  "label": false
+ },
+ {
+  "text": "Congrats to the design team for the site revamp.",
+  "label": false
+ },
+ {
+  "text": "Sales pipeline is looking strong for next quarter.",
+  "label": false
+ },
+ {
+  "text": "Thanks for the great meeting today.",
+  "label": false
+ },
+ {
+  "text": "Employee engagement scores have improved.",
+  "label": false
+ },
+ {
+  "text": "Thanks to everyone for the positive reviews.",
+  "label": false
+ },
+ {
+  "text": "API performance has improved by 15%.",
+  "label": false
+ },
+ {
+  "text": "New product features are 80% complete.",
+  "label": false
+ },
+ {
+  "text": "Thanks for the support during the launch.",
+  "label": false
+ },
+ {
+  "text": "Database performance is up 10% this month.",
+  "label": false
+ },
+ {
+  "text": "Team exceeded targets for Q3 sales.",
+  "label": false
+ },
+ {
+  "text": "Thanks to the IT team for the smooth transition.",
+  "label": false
+ },
+ {
+  "text": "Feedback session was productive and insightful.",
+  "label": false
+ },
+ {
+  "text": "There's a deadline for the Q4 report on Friday, so just wanted to remind everyone.",
+  "label": false
+ },
+ {
+  "text": "Did anyone get a chance to look at the deliverables from last week's meeting?",
+  "label": false
+ },
+ {
+  "text": "Just checking in on the status of the client presentation slides.",
+  "label": false
+ },
+ {
+  "text": "The system automatically updates the project calendar with due dates.",
+  "label": false
+ },
+ {
+  "text": "Sales team mentioned they need the latest update by Wednesday for their planning.",
+  "label": false
+ },
+ {
+  "text": "Is there a specific timeline for the final approval on this?",
+  "label": false
+ },
+ {
+  "text": "Just saw the task was completed last week, didn't realize it needed a follow-up.",
+  "label": false
+ },
+ {
+  "text": "When are we supposed to submit the progress report?",
+  "label": false
+ },
+ {
+  "text": "The tool should have sent out the reminders yesterday, right?",
+  "label": false
+ },
+ {
+  "text": "I noticed the project status emails are set to go out every Friday.",
+  "label": false
+ },
+ {
+  "text": "Did anyone get the memo about the new deliverables due next month?",
+  "label": false
+ },
+ {
+  "text": "Just a reminder, the deadline for the next draft is tomorrow.",
+  "label": false
+ },
+ {
+  "text": "The CRM tool sends out notifications for upcoming deadlines, right?",
+  "label": false
+ },
+ {
+  "text": "Is the deliverable for the case study supposed to be in by the end of the week?",
+  "label": false
+ },
+ {
+  "text": "I heard the Q3 report has a deadline coming up soon.",
+  "label": false
+ },
+ {
+  "text": "Any updates on when the client needs the final version?",
+  "label": false
+ },
+ {
+  "text": "Just saw the task was supposed to be completed last week, any updates?",
+  "label": false
+ },
+ {
+  "text": "The project management tool should flag any overdue tasks.",
+  "label": false
+ },
+ {
+  "text": "Does anyone know the exact date for the next meeting?",
+  "label": false
+ },
+ {
+  "text": "Is there a schedule for the upcoming deliverables?",
+  "label": false
+ },
+ {
+  "text": "Just got an update that the deadline for the current project is on the 15th.",
+  "label": false
+ },
+ {
+  "text": "Wasn't there a deadline for the next phase by next week?",
+  "label": false
+ },
+ {
+  "text": "Is the client expecting a deliverable on the 22nd?",
+  "label": false
+ },
+ {
+  "text": "Didn't anyone else receive the email about the new deadline?",
+  "label": false
+ },
+ {
+  "text": "Does anyone know the status of the pending deliverables?",
+  "label": false
  }
 ]

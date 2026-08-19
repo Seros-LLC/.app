@@ -34,12 +34,30 @@ export class WorkspaceScope {
   }
 
   // ---- audit + meter (never carry content) ----
-  audit(event: string, outcome: 'ok' | 'denied' | 'failed', detail?: Record<string, string | number>) {
+  audit(
+    event: string,
+    outcome: 'ok' | 'denied' | 'failed',
+    detail?: Record<string, string | number>,
+    who?: {
+      actorType?: 'member' | 'system' | 'operator';
+      actorId?: string | null;
+      objectType?: string;
+      objectId?: string;
+      requestId?: string;
+    },
+  ) {
     this.db.insert(auditEvents).values({
       workspaceId: this.workspaceId, event, outcome,
+      actorType: who?.actorType ?? (who?.actorId ? 'member' : 'system'),
+      actorId: who?.actorId ?? null,
+      objectType: who?.objectType ?? null,
+      objectId: who?.objectId ?? null,
+      // omitted rather than undefined, so the database default fires
+      ...(who?.requestId ? { requestId: who.requestId } : {}),
       detail: detail ? JSON.stringify(detail) : null, at: Date.now(),
     }).run();
   }
+
   meter(purpose: 'detect'|'draft'|'route'|'replay'|'other',
         outcome: 'ok'|'timeout'|'invalid_output'|'provider_error'|'budget_blocked') {
     this.db.insert(actionMeter).values({
@@ -110,6 +128,25 @@ export class WorkspaceScope {
     return this.db.select().from(drafts)
       .where(and(eq(drafts.workspaceId, this.workspaceId), eq(drafts.id, id))).get();
   }
+  /** The tasks page needs a join; it does NOT need the tables. */
+  taskRows(limit = 100) {
+    return this.db.select({
+        id: tasks.id, writeState: tasks.writeState, createdAt: tasks.createdAt,
+        title: drafts.title, owner: drafts.suggestedOwner, due: drafts.suggestedDueDate,
+        memberId: confirmations.memberId,
+      }).from(tasks)
+      .innerJoin(confirmations, and(eq(confirmations.workspaceId, tasks.workspaceId), eq(confirmations.id, tasks.confirmationId)))
+      .innerJoin(drafts, and(eq(drafts.workspaceId, confirmations.workspaceId), eq(drafts.id, confirmations.draftId)))
+      .where(eq(tasks.workspaceId, this.workspaceId))
+      .orderBy(desc(tasks.createdAt)).limit(limit).all();
+  }
+
+  auditRows(limit = 100) {
+    return this.db.select().from(auditEvents)
+      .where(eq(auditEvents.workspaceId, this.workspaceId))
+      .orderBy(desc(auditEvents.id)).limit(limit).all();
+  }
+
   recentTasks(limit = 20) {
     return this.db.select().from(tasks)
       .where(eq(tasks.workspaceId, this.workspaceId)).orderBy(desc(tasks.createdAt)).limit(limit).all();
@@ -174,7 +211,8 @@ export class WorkspaceScope {
     this.db.update(drafts).set({ state: decision === 'rejected' ? 'rejected' : 'confirmed' })
       .where(and(eq(drafts.workspaceId, this.workspaceId), eq(drafts.id, draftId))).run();
     this.audit(decision === 'rejected' ? 'draft.rejected' : 'draft.confirmed', 'ok',
-               { draft_id: draftId, confirmation_id: confirmationId, member_id: memberId });
+               { draft_id: draftId, confirmation_id: confirmationId, member_id: memberId },
+               { actorType: 'member', actorId: memberId, objectType: 'draft', objectId: draftId });
 
     if (decision === 'rejected') return { ok: true as const, confirmationId, taskId: null };
 
@@ -184,6 +222,42 @@ export class WorkspaceScope {
     this.audit('task.queued', 'ok', { task_id: taskId, confirmation_id: confirmationId });
     this.enqueue('tracker_write', { confirmationId });
     return { ok: true as const, confirmationId, taskId };
+  }
+
+  /** The roster, for owner resolution. Ids and names only. */
+  roster() {
+    return this.db.select({ id: members.id, name: members.name }).from(members)
+      .where(eq(members.workspaceId, this.workspaceId)).all();
+  }
+
+  /** The sign-in page needs names and roles, not the members table. */
+  rosterWithRoles() {
+    return this.db.select({ id: members.id, name: members.name, role: members.role, status: members.status })
+      .from(members).where(eq(members.workspaceId, this.workspaceId)).all();
+  }
+
+  /** What the tracker writer needs, fetched through the scope rather than around it. */
+  writeJob(confirmationId: string) {
+    const conf = this.db.select().from(confirmations).where(and(
+      eq(confirmations.workspaceId, this.workspaceId), eq(confirmations.id, confirmationId))).get();
+    if (!conf) return null;
+    const task = this.db.select().from(tasks).where(and(
+      eq(tasks.workspaceId, this.workspaceId), eq(tasks.confirmationId, confirmationId))).get();
+    const draft = this.db.select().from(drafts).where(and(
+      eq(drafts.workspaceId, this.workspaceId), eq(drafts.id, conf.draftId))).get();
+    return { conf, task, draft };
+  }
+
+  /**
+   * Conditional on the state that was read: if another worker got there first this
+   * updates zero rows, and the caller must not write, meter or audit again.
+   */
+  markTaskCreated(taskId: string): boolean {
+    const res: any = this.db.update(tasks)
+      .set({ writeState: 'created', threadReplyState: 'posted' })
+      .where(and(eq(tasks.workspaceId, this.workspaceId), eq(tasks.id, taskId),
+                 eq(tasks.writeState, 'queued'))).run();
+    return res?.changes !== 0;
   }
 
   addMember(id: string, name: string, role: 'owner'|'admin'|'confirmer'|'viewer' = 'confirmer') {

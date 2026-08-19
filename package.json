@@ -9,11 +9,14 @@
     "start": "tsx src/server.ts",
     "worker": "tsx src/worker.ts",
     "sweep": "tsx src/sweep.ts",
+    "limits": "tsx src/limits-cli.ts",
     "prune": "tsx src/prune.ts",
     "test": "tsx --test tests/*.test.ts",
     "eval": "tsx evals/detection.ts",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "check:tenancy": "tsx tools/check-tenancy.ts",
+    "verify": "npm run typecheck && npm run check:tenancy && npm test"
   },
   "keywords": [],
   "author": "",
