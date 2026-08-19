@@ -1,0 +1,33 @@
+{
+  "name": "seros-app",
+  "version": "1.0.0",
+  "description": "Seros: turns what a team already said into confirmed, owned, dated tasks. Human confirmation before any write.",
+  "main": "index.js",
+  "scripts": {
+    "migrate": "tsx src/db/migrate.ts",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "worker": "tsx src/worker.ts",
+    "sweep": "tsx src/sweep.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "eval": "tsx evals/detection.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.2.1",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0",
+    "drizzle-orm": "^0.45.2"
+  }
+}

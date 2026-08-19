@@ -1,0 +1,82 @@
+[
+ {
+  "text": "I'll send the revised deck to Priya by Thursday.",
+  "label": true
+ },
+ {
+  "text": "We'll ship the billing fix before the demo on Friday.",
+  "label": true
+ },
+ {
+  "text": "I will review your PR tomorrow morning.",
+  "label": true
+ },
+ {
+  "text": "I'll write up the incident report and share it.",
+  "label": true
+ },
+ {
+  "text": "Sure, I'll get back to you with numbers this week.",
+  "label": true
+ },
+ {
+  "text": "I'll fix the login bug today.",
+  "label": true
+ },
+ {
+  "text": "We will follow up with the vendor on Monday.",
+  "label": true
+ },
+ {
+  "text": "I'll take the customer call at 3.",
+  "label": true
+ },
+ {
+  "text": "Can someone look at the staging build?",
+  "label": false
+ },
+ {
+  "text": "Nice work on the release everyone.",
+  "label": false
+ },
+ {
+  "text": "Do we know why the deploy failed?",
+  "label": false
+ },
+ {
+  "text": "The dashboard looks much better now.",
+  "label": false
+ },
+ {
+  "text": "Should we move standup to 10?",
+  "label": false
+ },
+ {
+  "text": "Reminder: office is closed Monday.",
+  "label": false
+ },
+ {
+  "text": "Who owns the billing service these days?",
+  "label": false
+ },
+ {
+  "text": "That's a good idea, worth exploring.",
+  "label": false
+ },
+ {
+  "text": "Someone will need to send the deck at some point.",
+  "label": false
+ },
+ {
+  "text": "If we ship Friday, I'll be surprised.",
+  "label": false
+ },
+ {
+  "text": "He said he'll handle it, no action for us.",
+  "label": false
+ },
+ {
+  "text": "Will you send the deck by Thursday?",
+  "label": false
+ }
+]

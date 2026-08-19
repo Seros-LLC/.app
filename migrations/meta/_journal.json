@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "migrate": {
+    "table": "__drizzle_migrations__",
+    "schema": "public",
+    "dir": "./migrations"
+  },
+  "entries": [
+    {
+      "idx": 1,
+      "version": 1,
+      "when": 1730000000,
+      "tag": "0001_initial_schema",
+      "name": "0001_initial_schema",
+      "revert": false,
+      "folder": ""
+    }
+  ]
+}

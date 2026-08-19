@@ -1,0 +1,11 @@
+{
+  "schema": "./src/db/schema.ts",
+  "dialect": "sqlite",
+  "migrations": {
+    "folder": "./migrations",
+    "pack": false
+  },
+  "dbCredentials": {
+    "url": "seros.db"
+  }
+}
