@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS source_messages (
   content_purged_at INTEGER,
   received_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, channel_id, ts),
-  UNIQUE (workspace_id, channel_id, ts)
+  UNIQUE (workspace_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS drafts (
@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS drafts (
   suggested_owner TEXT,
   state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','confirmed','rejected','expired','superseded')),
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, id)
+  PRIMARY KEY (workspace_id, id),
+  FOREIGN KEY (workspace_id, source_message_id) REFERENCES source_messages(workspace_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS confirmations (
@@ -58,7 +59,9 @@ CREATE TABLE IF NOT EXISTS confirmations (
   member_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, id),
-  UNIQUE (workspace_id, draft_id)
+  UNIQUE (workspace_id, draft_id),
+  FOREIGN KEY (workspace_id, draft_id)  REFERENCES drafts(workspace_id, id),
+  FOREIGN KEY (workspace_id, member_id) REFERENCES members(workspace_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -70,7 +73,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   idempotency_key TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, id),
-  UNIQUE (workspace_id, confirmation_id)
+  UNIQUE (workspace_id, confirmation_id),
+  FOREIGN KEY (workspace_id, confirmation_id) REFERENCES confirmations(workspace_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (

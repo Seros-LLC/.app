@@ -73,8 +73,12 @@ function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: string, 
   if (task.writeState === 'created') return;                          // already written
   const d = db.select().from(drafts)
     .where(and(eq(drafts.workspaceId, workspaceId), eq(drafts.id, conf.draftId))).get();
-  db.update(tasks).set({ writeState: 'created', threadReplyState: 'posted' })
-    .where(and(eq(tasks.workspaceId, workspaceId), eq(tasks.id, task.id))).run();
+  // Conditional on the state we read: if another worker got there first, this
+  // updates zero rows and we do not write, meter or audit a second time.
+  const res: any = db.update(tasks).set({ writeState: 'created', threadReplyState: 'posted' })
+    .where(and(eq(tasks.workspaceId, workspaceId), eq(tasks.id, task.id),
+               eq(tasks.writeState, 'queued'))).run();
+  if (res?.changes === 0) return;
   WorkspaceScope.open(db, workspaceId).audit('task.created', 'ok',
     { task_id: task.id, confirmation_id: confirmationId, idempotency_key: task.idempotencyKey });
   console.log(JSON.stringify({ level: 'info', event: 'tracker.write', task_id: task.id, title_len: (d?.title ?? '').length }));
@@ -99,10 +103,21 @@ async function main() {
   migrateDb();
   const db = openDb();
   console.log(JSON.stringify({ level: 'info', event: 'worker.started' }));
+  // The loop is the thing that must not die. A job may fail; the worker may not.
   for (;;) {
-    const did = await tick(db);
+    let did = false;
+    try {
+      did = await tick(db);
+    } catch (e: any) {
+      console.error(JSON.stringify({ level: 'error', event: 'worker.tick_failed', error: String(e?.message ?? e) }));
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     if (!did) await new Promise((r) => setTimeout(r, 500));
   }
 }
+
+process.on('unhandledRejection', (e: any) => {
+  console.error(JSON.stringify({ level: 'error', event: 'worker.unhandled_rejection', error: String(e?.message ?? e) }));
+});
 
 if (require.main === module) main();

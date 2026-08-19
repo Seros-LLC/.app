@@ -3,7 +3,7 @@ import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { page, esc } from '../views';
 
-const WS = () => process.env.SEROS_WORKSPACE || 'demo';
+import { csrfToken } from '../auth';
 
 const SAMPLES = [
   "I'll send the revised deck to Priya by Thursday.",
@@ -12,10 +12,12 @@ const SAMPLES = [
   'Nice work on the release everyone.',
 ];
 
-export function demoPage(_req: Request, res: Response) {
+export function demoPage(req: Request, res: Response) {
+  const token = csrfToken(req.session!);
   const body = `<h1>Post a message</h1>
   <p class="sub">Stands in for Slack. Whatever you type goes through the same pipeline: ingest, detect, draft, queue.</p>
   <form class="card" method="post" action="/demo">
+    <input type="hidden" name="csrf" value="${esc(token)}">
     <label for="text">Message</label>
     <input id="text" type="text" name="text" size="60" value="${esc(SAMPLES[0])}">
     <div class="grid">
@@ -33,7 +35,7 @@ export function demoPost(req: Request, res: Response) {
   const text = String(req.body?.text ?? '').trim();
   if (!text) return res.redirect(303, '/demo');
   const db = openDb();
-  const scope = WorkspaceScope.ensure(db, WS());
+  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
   const { row, created } = scope.ingestMessage({
     channelId: String(req.body?.channel || 'C-general'),
     ts: String(Date.now() / 1000),

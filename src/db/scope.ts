@@ -135,10 +135,24 @@ export class WorkspaceScope {
     if (already) return { ok: false as const, reason: 'already_confirmed' };
 
     const confirmationId = randomUUID();
-    this.db.insert(confirmations).values({
-      workspaceId: this.workspaceId, draftId, id: confirmationId, decision,
-      surface: 'web', memberId, createdAt: Date.now(),
-    }).run();
+    try {
+      this.db.transaction((tx) => {
+        tx.insert(confirmations).values({
+          workspaceId: this.workspaceId, draftId, id: confirmationId, decision,
+          surface: 'web', memberId, createdAt: Date.now(),
+        }).run();
+        if (decision !== 'rejected') {
+          tx.insert(tasks).values({
+            workspaceId: this.workspaceId, id: randomUUID(), confirmationId,
+            writeState: 'queued', threadReplyState: 'pending',
+            idempotencyKey: confirmationId, createdAt: Date.now(),
+          }).run();
+        }
+      });
+    } catch {
+      // the UNIQUE (workspace_id, draft_id) index lost a race with another confirmer
+      return { ok: false as const, reason: 'already_confirmed' };
+    }
 
     if (edits && decision === 'confirmed_with_edits') {
       this.db.update(drafts).set({
@@ -155,13 +169,9 @@ export class WorkspaceScope {
 
     if (decision === 'rejected') return { ok: true as const, confirmationId, taskId: null };
 
-    // idempotency key IS the confirmation id; unique index makes a double write impossible
-    const taskId = randomUUID();
-    this.db.insert(tasks).values({
-      workspaceId: this.workspaceId, id: taskId, confirmationId,
-      writeState: 'queued', threadReplyState: 'pending',
-      idempotencyKey: confirmationId, createdAt: Date.now(),
-    }).onConflictDoNothing().run();
+    // the task row was written inside the same transaction as its confirmation
+    const taskId = this.db.select().from(tasks).where(and(
+      eq(tasks.workspaceId, this.workspaceId), eq(tasks.confirmationId, confirmationId))).get()!.id;
     this.audit('task.queued', 'ok', { task_id: taskId, confirmation_id: confirmationId });
     this.enqueue('tracker_write', { confirmationId });
     return { ok: true as const, confirmationId, taskId };

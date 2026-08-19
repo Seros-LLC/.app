@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.SEROS_PROVIDER = 'fake';          // deterministic, offline
-process.env.SEROS_SIGNING_SECRET = 'test-secret';
+process.env.SEROS_SIGNING_SECRET = 'test-secret-that-is-long-enough';
+process.env.SEROS_SESSION_SECRET = 'test-session-secret-long-enough';
 
 const dir = mkdtempSync(join(tmpdir(), 'seros-test-'));
 process.env.SEROS_DB = join(dir, 'test.db');
@@ -25,13 +26,15 @@ const server = createApp().listen(0);
 const port = (server.address() as any).port;
 const url = (p: string) => `http://127.0.0.1:${port}${p}`;
 
+WorkspaceScope.ensure(db, 'T-test');   // the webhook refuses unknown workspaces now
+
 function postEvent(text: string, opts: { secret?: string; ts?: string; team?: string } = {}) {
   const ts = opts.ts ?? String(Math.floor(Date.now() / 1000));
   const body = JSON.stringify({ team_id: opts.team ?? 'T-test', event: { type: 'message', channel: 'C1', ts: String(Math.random()), user: 'u-ana', text } });
   return fetch(url('/api/slack/events'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-slack-request-timestamp': ts,
-               'x-slack-signature': sign(body, ts, opts.secret ?? 'test-secret') },
+               'x-slack-signature': sign(body, ts, opts.secret ?? 'test-secret-that-is-long-enough') },
     body,
   });
 }

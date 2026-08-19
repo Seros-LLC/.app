@@ -116,7 +116,8 @@ export async function complete<T>(req: CompleteRequest, schema: z.ZodType<T>): P
   if (raw === null) {
     raw = fakeComplete(req);           // BACKUP PATH
     provider = forceFake ? 'fake' : `fake(after:${outcome})`;
-    if (!forceFake) outcome = 'ok';    // degraded but served
+    // outcome is deliberately NOT reset to 'ok': the request was served, but the
+    // meter must record that the model failed, or an outage looks like a good day.
   }
 
   let parsed: unknown;

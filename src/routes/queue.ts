@@ -5,13 +5,15 @@ import { page, esc } from '../views';
 import { and, desc, eq } from 'drizzle-orm';
 import { auditEvents, confirmations, drafts, tasks } from '../db/schema';
 
-const WS = () => process.env.SEROS_WORKSPACE || 'demo';
-const ME = () => process.env.SEROS_MEMBER || 'u-demo';
+import { csrfToken } from '../auth';
 
 export function queuePage(req: Request, res: Response) {
+  const s = req.session!;                       // requireSession guarantees this
   const db = openDb();
-  const scope = WorkspaceScope.ensure(db, WS());
-  scope.addMember(ME(), 'Demo Confirmer', 'confirmer');
+  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const me = scope.member(s.memberId);
+  const canConfirm = !!me && me.status === 'active' && me.role !== 'viewer';
+  const token = csrfToken(s);
   const rows = scope.pendingDrafts();
   const flash = typeof req.query.msg === 'string' ? req.query.msg : '';
 
@@ -23,6 +25,7 @@ export function queuePage(req: Request, res: Response) {
   ${rows.map((d) => `
     <form class="card" method="post" action="/confirm">
       <input type="hidden" name="draftId" value="${esc(d.id)}">
+      <input type="hidden" name="csrf" value="${esc(token)}">
       <p class="meta">${esc(d.kind)} &middot; confidence ${esc(d.confidence)}% &middot; ${esc(d.provider ?? 'unknown')}</p>
       <div class="grid">
         <div><label for="t-${esc(d.id)}">Title</label>
@@ -37,16 +40,18 @@ export function queuePage(req: Request, res: Response) {
           <input id="d-${esc(d.id)}" type="date" name="due" value="${esc(d.suggestedDueDate ?? '')}"></div>
       </div>
       <div class="row">
-        <button class="primary" type="submit" name="decision" value="confirm">Confirm</button>
-        <button type="submit" name="decision" value="reject">Reject</button>
+        ${canConfirm
+          ? `<button class="primary" type="submit" name="decision" value="confirm">Confirm</button>
+             <button type="submit" name="decision" value="reject">Reject</button>`
+          : `<span class="pill">read only — your role cannot confirm</span>`}
       </div>
     </form>`).join('')}`;
   res.type('html').send(page('Confirm queue', '/queue', body));
 }
 
-export function tasksPage(_req: Request, res: Response) {
+export function tasksPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = WorkspaceScope.ensure(db, WS());
+  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
   const rows = db.select({
       id: tasks.id, writeState: tasks.writeState, createdAt: tasks.createdAt,
       title: drafts.title, owner: drafts.suggestedOwner, due: drafts.suggestedDueDate,
@@ -68,9 +73,9 @@ export function tasksPage(_req: Request, res: Response) {
   res.type('html').send(page('Tasks', '/tasks', body));
 }
 
-export function auditPage(_req: Request, res: Response) {
+export function auditPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = WorkspaceScope.ensure(db, WS());
+  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
   const rows = db.select().from(auditEvents)
     .where(eq(auditEvents.workspaceId, scope.workspaceId))
     .orderBy(desc(auditEvents.id)).limit(100).all();

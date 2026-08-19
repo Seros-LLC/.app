@@ -11,7 +11,8 @@
     "sweep": "tsx src/sweep.ts",
     "test": "tsx --test tests/*.test.ts",
     "eval": "tsx evals/detection.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx src/seed.ts"
   },
   "keywords": [],
   "author": "",
