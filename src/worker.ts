@@ -1,26 +1,14 @@
 import { openDb, migrateDb } from './db/client';
 import { claimNextJob, finishJob, retryJob } from './db/system';
 import { WorkspaceScope } from './db/scope';
-import { complete, DetectionSchema, DraftSchema } from './provider/index';
+import { complete, dbMeterContext, DetectionSchema, DraftSchema } from './provider/index';
 import { and, eq } from 'drizzle-orm';
 import { confirmations, drafts, tasks, members } from './db/schema';
 import { sanitizeDueDate, resolveOwner } from './sanitize';
+import { DETECT_SYSTEM, draftSystem } from './prompts';
 
 const detectThreshold = () => Number(process.env.SEROS_DETECT_THRESHOLD || 55);
 
-const DETECT_SYSTEM =
-  'You decide whether a chat message contains a commitment: something a person undertook to do. ' +
-  'Reply ONLY with JSON: {"isCommitment":boolean,"confidence":0-100,"reason":string}. ' +
-  'A question, an opinion or praise is not a commitment.';
-const draftSystem = (now = new Date()) => {
-  const iso = now.toISOString().slice(0, 10);
-  const day = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getUTCDay()];
-  return 'You turn a chat message into a task draft. Reply ONLY with JSON: ' +
-    '{"title":string,"outcome":string,"proposedOwner":string|null,"dueDate":"YYYY-MM-DD"|null,"confidence":0-100}. ' +
-    `Today is ${iso}, a ${day}. Resolve "tomorrow" or a named weekday against that date. ` +
-    'If the message states no deadline at all, dueDate MUST be null - never guess one. ' +
-    'proposedOwner is whoever undertook the work, not the person it is being sent to; use null if unclear.';
-};
 
 async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, messageId: string) {
   const scope = WorkspaceScope.open(db, workspaceId);
@@ -32,15 +20,24 @@ async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, 
   }
   const body: string = msg.body;
 
-  const det = await complete({ tier: 'cheap', purpose: 'detect', system: DETECT_SYSTEM, user: body }, DetectionSchema);
-  scope.meter('detect', det.outcome);
+  // The provider meters itself now; the worker's job is to respect its answer.
+  const meter = dbMeterContext(db, workspaceId);
+  const det = await complete(meter, { tier: 'cheap', purpose: 'detect', system: DETECT_SYSTEM, user: body }, DetectionSchema);
+  if (!det.ok || det.value === null) {
+    // Degrade toward doing nothing: no draft is invented from a failed call.
+    scope.audit('detect.unavailable', 'failed', { message_id: messageId, outcome: det.outcome });
+    throw new Error(`detect unavailable: ${det.outcome}`);   // retried with backoff
+  }
   if (!det.value.isCommitment || det.value.confidence < detectThreshold()) {
     scope.audit('detect.discarded', 'ok', { message_id: messageId, confidence: Math.round(det.value.confidence) });
     return;
   }
 
-  const dr = await complete({ tier: 'standard', purpose: 'draft', system: draftSystem(), user: body }, DraftSchema);
-  scope.meter('draft', dr.outcome);
+  const dr = await complete(meter, { tier: 'standard', purpose: 'draft', system: draftSystem(), user: body }, DraftSchema);
+  if (!dr.ok || dr.value === null) {
+    scope.audit('draft.unavailable', 'failed', { message_id: messageId, outcome: dr.outcome });
+    throw new Error(`draft unavailable: ${dr.outcome}`);
+  }
   const roster = db.select({ id: members.id, name: members.name }).from(members)
     .where(eq(members.workspaceId, workspaceId)).all();
   const owner = resolveOwner(dr.value.proposedOwner, msg.authorId, roster);

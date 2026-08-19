@@ -78,5 +78,413 @@
  {
   "text": "Will you send the deck by Thursday?",
   "label": false
+ },
+ {
+  "text": "I'll make sure to send over the presentation slides by end of day today.",
+  "label": true
+ },
+ {
+  "text": "Got the approval email? I'll follow up with HR right away.",
+  "label": true
+ },
+ {
+  "text": "Can we discuss the project timeline tomorrow? I'll review the current status first.",
+  "label": true
+ },
+ {
+  "text": "I'll schedule the team meeting for next Monday at 10 AM sharp.",
+  "label": true
+ },
+ {
+  "text": "I found the bug in the code. I'll fix it now and test it later.",
+  "label": true
+ },
+ {
+  "text": "I'll reach out to the client this afternoon to confirm the meeting details.",
+  "label": true
+ },
+ {
+  "text": "I'll finalize the report and send it to you by the end of the week.",
+  "label": true
+ },
+ {
+  "text": "I'll coordinate with IT to get the server updated by EOD.",
+  "label": true
+ },
+ {
+  "text": "I'll check the shipping details and update the project management tool.",
+  "label": true
+ },
+ {
+  "text": "I'll prepare the proposal and send it to the manager by the end of the day.",
+  "label": true
+ },
+ {
+  "text": "I'll follow up with the supplier to expedite the delivery.",
+  "label": true
+ },
+ {
+  "text": "I'll review the budget and present the findings to the team tomorrow.",
+  "label": true
+ },
+ {
+  "text": "I'll send the invoice to the client and confirm receipt.",
+  "label": true
+ },
+ {
+  "text": "I'll organize the files and back them up right away.",
+  "label": true
+ },
+ {
+  "text": "I'll draft the contract and send it to legal for review.",
+  "label": true
+ },
+ {
+  "text": "I'll create the new user account and update the access list.",
+  "label": true
+ },
+ {
+  "text": "I'll attend the industry conference next week and gather relevant insights.",
+  "label": true
+ },
+ {
+  "text": "I'll update the project timeline and send it to all team members.",
+  "label": true
+ },
+ {
+  "text": "I'll coordinate the release date with the QA team for the next update.",
+  "label": true
+ },
+ {
+  "text": "I'll review the feedback and implement the necessary changes by the deadline.",
+  "label": true
+ },
+ {
+  "text": "I'll send out the survey results and prepare the summary report.",
+  "label": true
+ },
+ {
+  "text": "Looking into the project timeline update now.",
+  "label": true
+ },
+ {
+  "text": "Got the specs for the new design; leaving it with me to incorporate.",
+  "label": true
+ },
+ {
+  "text": "Considering the client feedback on the last project; happy to pick that up.",
+  "label": true
+ },
+ {
+  "text": "Taking this one on; getting started on the report right away.",
+  "label": true
+ },
+ {
+  "text": "Mine the data from the Q4 meeting; should have it ready soon.",
+  "label": true
+ },
+ {
+  "text": "Leaving the budget proposal to me; will get it sorted by tomorrow.",
+  "label": true
+ },
+ {
+  "text": "Need the final draft by Wednesday; on it now.",
+  "label": true
+ },
+ {
+  "text": "Picking up the task list for next week; will prioritize it.",
+  "label": true
+ },
+ {
+  "text": "Consider it done; finished the initial draft of the case study.",
+  "label": true
+ },
+ {
+  "text": "Handling the presentation slides; will send them over by the end of the day.",
+  "label": true
+ },
+ {
+  "text": "Mine the recent sales data; happy to have it ready by Friday.",
+  "label": true
+ },
+ {
+  "text": "Got the task; starting the market analysis report.",
+  "label": true
+ },
+ {
+  "text": "Taking this one; will send you the first draft tomorrow.",
+  "label": true
+ },
+ {
+  "text": "Leaving the email template with me; will make sure it's perfect.",
+  "label": true
+ },
+ {
+  "text": "Happy to take on the client onboarding process; will have it done by the end of the week.",
+  "label": true
+ },
+ {
+  "text": "Mine the social media metrics; will prepare the dashboard next.",
+  "label": true
+ },
+ {
+  "text": "Considering the feedback; will update the design by the deadline.",
+  "label": true
+ },
+ {
+  "text": "Leave the Q&A preparation to me; will make sure we're all set.",
+  "label": true
+ },
+ {
+  "text": "Got the task; will finalize the proposal by the meeting on Thursday.",
+  "label": true
+ },
+ {
+  "text": "Picking up the project calendar; making sure everything is on track.",
+  "label": true
+ },
+ {
+  "text": "Did anyone get the update on the project timeline?",
+  "label": false
+ },
+ {
+  "text": "Just saw the new version of the report; looks comprehensive.",
+  "label": false
+ },
+ {
+  "text": "Anyone have any ideas on how to improve our onboarding process?",
+  "label": false
+ },
+ {
+  "text": "Great meeting this morning; thanks for everyone's input.",
+  "label": false
+ },
+ {
+  "text": "Has anyone heard back from HR about the new software training dates?",
+  "label": false
+ },
+ {
+  "text": "Wondering if we can set up a call to discuss the feedback from the client.",
+  "label": false
+ },
+ {
+  "text": "Thought the analytics dashboard looked good; did you get a chance to update it?",
+  "label": false
+ },
+ {
+  "text": "Just noticed the budget numbers are a bit off; any idea why?",
+  "label": false
+ },
+ {
+  "text": "Anyone have any updates on the supplier for the new hardware?",
+  "label": false
+ },
+ {
+  "text": "The email newsletter was a hit last week; should we consider doing it monthly?",
+  "label": false
+ },
+ {
+  "text": "Have you seen the latest industry trends report?",
+  "label": false
+ },
+ {
+  "text": "Do we have a plan in place for next week's client meeting?",
+  "label": false
+ },
+ {
+  "text": "The sales team seems very enthusiastic about the new features; any feedback?",
+  "label": false
+ },
+ {
+  "text": "Just checked the project status; looks like we're on track.",
+  "label": false
+ },
+ {
+  "text": "Thought the team did a great job on the recent campaign.",
+  "label": false
+ },
+ {
+  "text": "Is there a protocol for handling client feedback in our process?",
+  "label": false
+ },
+ {
+  "text": "Have you started working on the quarterly review document yet?",
+  "label": false
+ },
+ {
+  "text": "Anyone have an update on the vendor contract negotiations?",
+  "label": false
+ },
+ {
+  "text": "The customer service response times have been excellent lately.",
+  "label": false
+ },
+ {
+  "text": "Any idea when we can get the team-building event organized?",
+  "label": false
+ },
+ {
+  "text": "The recent webinar was well-attended; any thoughts on doing more of these?",
+  "label": false
+ },
+ {
+  "text": "Anyone have a moment to review the proposal before we send it out?",
+  "label": false
+ },
+ {
+  "text": "It seems like someone else will handle the meeting prep this time.",
+  "label": false
+ },
+ {
+  "text": "I think we should probably let HR know about the policy update, but I'm not sure who's handling that right now.",
+  "label": false
+ },
+ {
+  "text": "Do you think we could maybe get that report done by the end of the week?",
+  "label": false
+ },
+ {
+  "text": "What if we assigned that task to John? I'm not sure he'll be able to fit it in his schedule.",
+  "label": false
+ },
+ {
+  "text": "I believe the team agreed that the project would be finished by the 15th, but I can't be certain.",
+  "label": false
+ },
+ {
+  "text": "Have you heard anything about when the new vendor is supposed to start?",
+  "label": false
+ },
+ {
+  "text": "Would it be possible for the design team to maybe work on this next?",
+  "label": false
+ },
+ {
+  "text": "I heard Sarah said she'd look into that issue for us.",
+  "label": false
+ },
+ {
+  "text": "It seems like the next step would be for them to finalize the plan.",
+  "label": false
+ },
+ {
+  "text": "Could someone please check with accounting to see when they can have those invoices processed?",
+  "label": false
+ },
+ {
+  "text": "I remember someone mentioning they had a contact who could help with that, but I'm not sure who.",
+  "label": false
+ },
+ {
+  "text": "It looks like the meeting has already been rescheduled for next week.",
+  "label": false
+ },
+ {
+  "text": "Do you think we could maybe get that update out by lunchtime?",
+  "label": false
+ },
+ {
+  "text": "I heard the manager said they would send over the updated budget this afternoon.",
+  "label": false
+ },
+ {
+  "text": "Is it possible that we could delegate that task to someone else?",
+  "label": false
+ },
+ {
+  "text": "I believe the last report was submitted on time, but I'm not positive.",
+  "label": false
+ },
+ {
+  "text": "Have you heard anything about the status of the project?",
+  "label": false
+ },
+ {
+  "text": "I think they said they'd get back to us with more details later today.",
+  "label": false
+ },
+ {
+  "text": "Does anyone know if they can still accept new clients for the upcoming quarter?",
+  "label": false
+ },
+ {
+  "text": "It seems like the team has already wrapped up that project.",
+  "label": false
+ },
+ {
+  "text": "Could you let me know if you can take the meeting next Tuesday?",
+  "label": false
+ },
+ {
+  "text": "We're working on a feature that will automatically update user profiles.",
+  "label": false
+ },
+ {
+  "text": "I won't be in the office next Thursday.",
+  "label": false
+ },
+ {
+  "text": "The system will be down for maintenance on the 10th.",
+  "label": false
+ },
+ {
+  "text": "Can you confirm if you can join the presentation at 3 PM?",
+  "label": false
+ },
+ {
+  "text": "I'll be out on Friday for a client meeting.",
+  "label": false
+ },
+ {
+  "text": "Just wanted to let everyone know I won't be in tomorrow.",
+  "label": false
+ },
+ {
+  "text": "The new policy will go into effect next month.",
+  "label": false
+ },
+ {
+  "text": "Could you add that to your calendar for me?",
+  "label": false
+ },
+ {
+  "text": "The bot will notify you when a task is overdue.",
+  "label": false
+ },
+ {
+  "text": "I'll be attending the marketing meeting today.",
+  "label": false
+ },
+ {
+  "text": "We're planning to roll out the new version next week.",
+  "label": false
+ },
+ {
+  "text": "I won't be available for calls on Wednesday.",
+  "label": false
+ },
+ {
+  "text": "The integration will be tested internally first.",
+  "label": false
+ },
+ {
+  "text": "I won't be attending the conference this year.",
+  "label": false
+ },
+ {
+  "text": "The bot will send reminders for upcoming deadlines.",
+  "label": false
+ },
+ {
+  "text": "The new feature will be launched soon.",
+  "label": false
+ },
+ {
+  "text": "I'll be on vacation the week after next.",
+  "label": false
+ },
+ {
+  "text": "We're hoping to have the report ready by the end of the month.",
+  "label": false
  }
 ]

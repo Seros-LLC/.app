@@ -44,15 +44,31 @@ One operation, no streaming, no tools, no vendor type escapes the file.
 The app therefore never hangs on a model and never crashes on a bad response; it
 degrades to something dumber and keeps a human in the loop.
 
-Measured on the 20-example golden set (`npm run eval`):
+Measured on the 122-example golden set (`npm run eval`), which prints a threshold
+sweep so the operating point is chosen from evidence rather than taste:
 
-| Provider | Precision | Recall | Wall clock |
-|---|---|---|---|
-| `ollama:qwen2.5:7b-instruct` | **88.9%** | 100% | 21.8s |
-| deterministic fake (backup) | 80.0% | 100% | 0.0s |
+| Provider | Prompt | Precision | Recall | F1 | Wall clock |
+|---|---|---|---|---|---|
+| `ollama:qwen2.5:7b-instruct` | detect/v2 | **100.0%** | 89.8% | 94.6% | 118s |
+| `ollama:qwen2.5:7b-instruct` | detect/v1 | 81.0% | 95.9% | 87.9% | 110s |
+| deterministic fake (backup) | — | 80.0% | 65.3% | 71.9% | 0.0s |
 
 Precision is the number that matters: a missed commitment costs nothing, a wrong task
 in someone's tracker costs trust.
+
+**How v2 happened, because it is the argument for keeping the harness.** v1 lost eleven
+false positives to a single family — statements about where a person will *be*, what
+they will *not* do, and what a *system* will do on its own: "I'll be out Friday", "I
+won't be in the office Thursday", "The bot will send reminders". The model rated every
+one of them 100, so the sweep showed no threshold could rescue it; precision peaked at
+86% and stayed there. The instruction changed instead, and the false positives went to
+zero. Prompts are versioned in `src/prompts.ts` and the version is recorded on every
+metered call, so a rollback is a flag flip.
+
+The golden set itself was written by the same local Qwen — 102 of its 122 examples,
+generated in about 35 seconds of GPU time as synthetic fixtures (the brief requires
+fixtures be synthetic), then read and labelled by hand. One generated "hard negative"
+was in fact a real commitment and was dropped.
 
 ```bash
 SEROS_PROVIDER=fake npm run eval                 # force the backup

@@ -89,12 +89,29 @@ export const auditEvents = sqliteTable('audit_events', {
   at: integer('at').notNull(),
 });
 
+// The meter row is the cost record (migration 0002_meter_cost.sql, which owns
+// this table). Every added column has a default, so the old four-field insert in
+// WorkspaceScope.meter still compiles and still works. Contains no customer
+// content by construction: ids, counts, prices, outcomes.
 export const actionMeter = sqliteTable('action_meter', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
   id: integer('id').primaryKey({autoIncrement:true}),
   purpose: text('purpose', { enum:['detect','draft','route','replay','other'] }).notNull(),
   outcome: text('outcome', { enum:['ok','timeout','invalid_output','provider_error','budget_blocked'] }).notNull(),
   at: integer('at').notNull(),
+  tier: text('tier', { enum:['cheap','standard','careful'] }),
+  provider: text('provider'),
+  model: text('model'),
+  promptVersion: text('prompt_version'),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cachedInputTokens: integer('cached_input_tokens').notNull().default(0),
+  estimatedCostMicros: integer('estimated_cost_micros').notNull().default(0),
+  priceTableVersion: text('price_table_version'),
+  latencyMs: integer('latency_ms'),
+  refType: text('ref_type'),
+  refId: text('ref_id'),
+  billableAction: integer('billable_action').notNull().default(1),
 });
 
 export const jobs = sqliteTable('jobs', {

@@ -9,6 +9,7 @@
     "start": "tsx src/server.ts",
     "worker": "tsx src/worker.ts",
     "sweep": "tsx src/sweep.ts",
+    "prune": "tsx src/prune.ts",
     "test": "tsx --test tests/*.test.ts",
     "eval": "tsx evals/detection.ts",
     "typecheck": "tsc --noEmit",

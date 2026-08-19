@@ -30,7 +30,7 @@ WorkspaceScope.ensure(db, 'T-test');   // the webhook refuses unknown workspaces
 
 function postEvent(text: string, opts: { secret?: string; ts?: string; team?: string } = {}) {
   const ts = opts.ts ?? String(Math.floor(Date.now() / 1000));
-  const body = JSON.stringify({ team_id: opts.team ?? 'T-test', event: { type: 'message', channel: 'C1', ts: String(Math.random()), user: 'u-ana', text } });
+  const body = JSON.stringify({ team_id: opts.team ?? 'T-test', event: { type: 'message', channel: 'C1', ts: `${Date.now()}.${Math.floor(Math.random() * 1e6)}`, user: 'u-ana', text } });
   return fetch(url('/api/slack/events'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-slack-request-timestamp': ts,
@@ -59,6 +59,35 @@ test('webhook: wrong secret is rejected 401', async () => {
 test('webhook: stale timestamp is rejected 401', async () => {
   const r = await postEvent('anything', { ts: String(Math.floor(Date.now() / 1000) - 6000) });
   assert.equal(r.status, 401);
+});
+
+test('webhook: a replayed signature is spent and refused', async () => {
+  const ts = String(Math.floor(Date.now() / 1000));
+  const body = JSON.stringify({ team_id: 'T-test', event: { type: 'message', channel: 'C1', ts: '4242.42', user: 'u-ana', text: "I'll do the thing." } });
+  const headers = { 'content-type': 'application/json', 'x-slack-request-timestamp': ts,
+                    'x-slack-signature': sign(body, ts, 'test-secret-that-is-long-enough') };
+  const first = await fetch(url('/api/slack/events'), { method: 'POST', headers, body });
+  const second = await fetch(url('/api/slack/events'), { method: 'POST', headers, body });
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 409);
+});
+
+test('webhook: a timestamp from the future is refused', async () => {
+  const ts = String(Math.floor(Date.now() / 1000) + 3600);
+  const body = JSON.stringify({ team_id: 'T-test', event: { type: 'message', channel: 'C1', ts: '1.1', user: 'u', text: 'x' } });
+  const r = await fetch(url('/api/slack/events'), { method: 'POST', headers: {
+    'content-type': 'application/json', 'x-slack-request-timestamp': ts,
+    'x-slack-signature': sign(body, ts, 'test-secret-that-is-long-enough') }, body });
+  assert.equal(r.status, 401);
+});
+
+test('webhook: an event with no ts is refused rather than given our clock', async () => {
+  const ts = String(Math.floor(Date.now() / 1000));
+  const body = JSON.stringify({ team_id: 'T-test', event: { type: 'message', channel: 'C1', user: 'u', text: 'no ts here' } });
+  const r = await fetch(url('/api/slack/events'), { method: 'POST', headers: {
+    'content-type': 'application/json', 'x-slack-request-timestamp': ts,
+    'x-slack-signature': sign(body, ts, 'test-secret-that-is-long-enough') }, body });
+  assert.equal(r.status, 400);
 });
 
 test('webhook: missing headers rejected 401', async () => {

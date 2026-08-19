@@ -86,13 +86,6 @@ CREATE TABLE IF NOT EXISTS audit_events (
   at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS action_meter (
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  purpose TEXT NOT NULL CHECK(purpose IN ('detect','draft','route','replay','other')),
-  outcome TEXT NOT NULL CHECK(outcome IN ('ok','timeout','invalid_output','provider_error','budget_blocked')),
-  at INTEGER NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS jobs (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),

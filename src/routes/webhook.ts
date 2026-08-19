@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import crypto from 'node:crypto';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
+import { checkAndRecordReplay } from '../replay';
 
 /** No default. A signing secret that ships in the source is not a signing secret. */
 export const secret = () => {
@@ -23,7 +24,9 @@ function verify(req: Request, raw: string): { ok: true } | { ok: false; why: str
   if (!sig || !ts) return { ok: false, why: 'missing_headers' };
   const tsNum = Number(ts);
   if (!Number.isFinite(tsNum)) return { ok: false, why: 'bad_timestamp' };
-  if (Math.abs(Date.now() / 1000 - tsNum) > MAX_AGE_SEC) return { ok: false, why: 'stale_timestamp' };
+  const skew = Date.now() / 1000 - tsNum;
+  if (skew > MAX_AGE_SEC) return { ok: false, why: 'stale_timestamp' };
+  if (skew < -60) return { ok: false, why: 'future_timestamp' };
   const expected = Buffer.from(sign(raw, ts));
   const given = Buffer.from(sig);
   if (expected.length !== given.length) return { ok: false, why: 'bad_signature' };
@@ -48,7 +51,8 @@ export async function webhookHandler(req: Request, res: Response) {
   const ev = b.event ?? b;
   const workspaceId = b.team_id || b.workspace_id || 'demo';
   const channelId = ev.channel || 'unknown';
-  const ts = String(ev.ts || Date.now() / 1000);
+  if (typeof ev.ts !== 'string' || !ev.ts) return res.status(400).json({ ok: false, error: 'missing_event_ts' });
+  const ts = ev.ts;
   const authorId = ev.user || 'unknown';
   const text = typeof ev.text === 'string' ? ev.text : '';
   if (!text.trim()) return res.json({ ok: true, ignored: 'empty' });
@@ -57,6 +61,16 @@ export async function webhookHandler(req: Request, res: Response) {
   // open(), never ensure(): a signed event for an unknown workspace must not be able
   // to conjure a tenant into existence.
   const db = openDb();
+
+  // A signature may be spent exactly once. Without this, anything inside the
+  // freshness window can be sent again and again.
+  const sigHeader = req.header('x-slack-signature')!;
+  const tsHeader = Number(req.header('x-slack-request-timestamp'));
+  if (!checkAndRecordReplay(db, sigHeader, tsHeader).fresh) {
+    console.log(JSON.stringify({ level: 'warn', event: 'webhook.replayed' }));
+    return res.status(409).json({ ok: false, error: 'replayed_signature' });
+  }
+
   let scope;
   try { scope = WorkspaceScope.open(db, workspaceId); }
   catch { 
