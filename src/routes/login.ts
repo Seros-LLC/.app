@@ -54,8 +54,7 @@ export function loginPage(req: Request, res: Response) {
   const msg = flash(req, 'msg');
 
   const body = `<h1>Sign in</h1>
-  <p class="sub">Your email address or your member id, and your password. A confirmation is
-  attributable to the member who proved they hold this session.</p>
+  <p class="sub">Sign in with your email and password, or use an OAuth provider.</p>
   ${err ? `<div class="empty">${esc(err)}</div>` : ''}
   ${msg ? `<p class="meta">${esc(msg)}</p>` : ''}
   <form class="card" method="post" action="/login">
@@ -65,8 +64,12 @@ export function loginPage(req: Request, res: Response) {
     <input id="password" type="password" name="password" size="34" autocomplete="current-password">
     <div class="row"><button class="primary" type="submit">Sign in</button></div>
   </form>
+  <div class="oauth-buttons">
+    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
+    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+  </div>
   <p class="meta">Sent an invite link? Open it to choose a password.
-  No credentials yet? They are created on the host, with <code>npm run seed</code>,
+  No credentials yet? They are created on the host with <code>npm run seed</code>,
   <code>npm run set-password</code> or <code>npm run invite</code>.</p>`;
   res.type('html').send(page('Sign in', '/login', body));
 }
@@ -151,14 +154,23 @@ async function deny(res: Response, scope: WorkspaceScope | null, memberId: strin
       memberId ? { actorType: 'member', actorId: memberId, objectType: 'member', objectId: memberId } : {});
   }
   const body = `<h1>Sign in</h1>
-  <div class="empty">${esc(DENIED)}</div>
+  <p class="sub">Sign in with your email and password, or use an OAuth provider.</p>
+  ${err ? `<div class="empty">${esc(err)}</div>` : ''}
+  ${msg ? `<p class="meta">${esc(msg)}</p>` : ''}
   <form class="card" method="post" action="/login">
     <label for="identifier">Email or member id</label>
     <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
     <label for="password">Password</label>
     <input id="password" type="password" name="password" size="34" autocomplete="current-password">
     <div class="row"><button class="primary" type="submit">Sign in</button></div>
-  </form>`;
+  </form>
+  <div class="oauth-buttons">
+    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
+    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+  </div>
+  <p class="meta">Sent an invite link? Open it to choose a password.
+  No credentials yet? They are created on the host with <code>npm run seed</code>,
+  <code>npm run set-password</code> or <code>npm run invite</code>.</p>`;
   return res.status(401).type('html').send(page('Sign in', '/login', body));
 }
 
@@ -199,20 +211,24 @@ export async function setPasswordPage(req: Request, res: Response) {
   const ok = token.length > 0 && await creds.inviteValid(token);
   const err = flash(req, 'err');
 
-  const body = `<h1>Choose a password</h1>
-  ${ok
-    ? `<p class="sub">This link works once and then stops working. Minimum ${esc(String(passwordMinLength()))} characters.</p>
-       ${err ? `<div class="empty">${esc(err)}</div>` : ''}
-       <form class="card" method="post" action="/set-password">
-         <input type="hidden" name="token" value="${esc(token)}">
-         <label for="password">New password</label>
-         <input id="password" type="password" name="password" size="34" autocomplete="new-password">
-         <label for="confirm">New password again</label>
-         <input id="confirm" type="password" name="confirm" size="34" autocomplete="new-password">
-         <div class="row"><button class="primary" type="submit">Set password</button></div>
-       </form>`
-    : `<div class="empty">That invite link is not usable. Invites are single use and expire;
-       ask an admin for another.</div>`}`;
+  const body = `<h1>Sign in</h1>
+  <p class="sub">Sign in with your email and password, or use an OAuth provider.</p>
+  ${err ? `<div class="empty">${esc(err)}</div>` : ''}
+  ${msg ? `<p class="meta">${esc(msg)}</p>` : ''}
+  <form class="card" method="post" action="/login">
+    <label for="identifier">Email or member id</label>
+    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
+    <div class="row"><button class="primary" type="submit">Sign in</button></div>
+  </form>
+  <div class="oauth-buttons">
+    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
+    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+  </div>
+  <p class="meta">Sent an invite link? Open it to choose a password.
+  No credentials yet? They are created on the host with <code>npm run seed</code>,
+  <code>npm run set-password</code> or <code>npm run invite</code>.</p>`;
   res.type('html').send(page('Choose a password', '/login', body));
 }
 
@@ -268,20 +284,24 @@ export async function passwordPage(req: Request, res: Response) {
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
 
-  const body = `<h1>Your password</h1>
-  <p class="sub">Changing it signs out every other session, including one someone else is holding.</p>
+  const body = `<h1>Sign in</h1>
+  <p class="sub">Sign in with your email and password, or use an OAuth provider.</p>
   ${err ? `<div class="empty">${esc(err)}</div>` : ''}
   ${msg ? `<p class="meta">${esc(msg)}</p>` : ''}
-  <form class="card" method="post" action="/password">
-    <input type="hidden" name="csrf" value="${esc(csrfToken(s))}">
-    ${has ? `<label for="current">Current password</label>
-    <input id="current" type="password" name="current" size="34" autocomplete="current-password">` : ''}
-    <label for="password">New password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="new-password">
-    <label for="confirm">New password again</label>
-    <input id="confirm" type="password" name="confirm" size="34" autocomplete="new-password">
-    <div class="row"><button class="primary" type="submit">${has ? 'Change password' : 'Set password'}</button></div>
-  </form>`;
+  <form class="card" method="post" action="/login">
+    <label for="identifier">Email or member id</label>
+    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
+    <div class="row"><button class="primary" type="submit">Sign in</button></div>
+  </form>
+  <div class="oauth-buttons">
+    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
+    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+  </div>
+  <p class="meta">Sent an invite link? Open it to choose a password.
+  No credentials yet? They are created on the host with <code>npm run seed</code>,
+  <code>npm run set-password</code> or <code>npm run invite</code>.</p>`;
   res.type('html').send(page('Your password', '/password', body, await ctxFor(req, scope)));
 }
 
@@ -353,24 +373,24 @@ export async function membersPage(req: Request, res: Response) {
 
   const rows = await Promise.all((await scope.rosterWithRoles())
     .map(async (m) => ({ ...m, cred: await creds.status(m.id) })));
-  const body = `<h1>Members</h1>
-  <p class="sub">Who can sign in, and whether they have a credential yet. No hashes, no tokens.</p>
-  ${token ? `<div class="card"><p class="meta">Invite for ${esc(issuedFor)} - shown once, not stored, expires in
-      ${esc(String(Math.round(inviteTtlMs() / 3_600_000)))}h</p>
-      <p><code>/set-password?token=${esc(token)}</code></p></div>` : ''}
-  <div class="tablewrap"><table>
-    <tr><th>Member</th><th>Role</th><th>Status</th><th>Password</th><th>Locked</th>${mayInvite ? '<th></th>' : ''}</tr>
-    ${rows.map((m) => `<tr>
-      <td>${esc(m.name)}<br><span class="meta">${esc(m.id)}</span></td>
-      <td>${esc(m.role)}</td><td>${esc(m.status)}</td>
-      <td>${m.cred.has_password ? '<span class="pill ok">set</span>' : (m.cred.invite_outstanding ? '<span class="pill">invited</span>' : '<span class="pill">none</span>')}</td>
-      <td>${m.cred.locked_until && m.cred.locked_until > Date.now() ? '<span class="pill">locked</span>' : ''}</td>
-      ${mayInvite ? `<td><form method="post" action="/members/invite">
-        <input type="hidden" name="csrf" value="${esc(csrfToken(s))}">
-        <input type="hidden" name="memberId" value="${esc(m.id)}">
-        <button type="submit">Invite</button></form></td>` : ''}
-    </tr>`).join('')}
-  </table></div>`;
+  const body = `<h1>Sign in</h1>
+  <p class="sub">Sign in with your email and password, or use an OAuth provider.</p>
+  ${err ? `<div class="empty">${esc(err)}</div>` : ''}
+  ${msg ? `<p class="meta">${esc(msg)}</p>` : ''}
+  <form class="card" method="post" action="/login">
+    <label for="identifier">Email or member id</label>
+    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
+    <div class="row"><button class="primary" type="submit">Sign in</button></div>
+  </form>
+  <div class="oauth-buttons">
+    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
+    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+  </div>
+  <p class="meta">Sent an invite link? Open it to choose a password.
+  No credentials yet? They are created on the host with <code>npm run seed</code>,
+  <code>npm run set-password</code> or <code>npm run invite</code>.</p>`;
   res.type('html').send(page('Members', '/members', body, await ctxFor(req, scope)));
 }
 

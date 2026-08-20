@@ -299,3 +299,12 @@ export class WorkspaceScope {
       .where(and(eq(members.workspaceId, this.workspaceId), eq(members.id, id))).limit(1))[0];
   }
 }
+  async memberByEmail(email: string) {
+    const { normaliseEmail } = await import('./password');
+    const e = normaliseEmail(email);
+    if (!e) return undefined;
+    return (await this.db.select().from(members)
+      .where(and(eq(members.workspaceId, this.workspaceId), eq(memberCredentials.email, e)))
+      .innerJoin(memberCredentials, and(eq(memberCredentials.workspaceId, this.workspaceId), eq(memberCredentials.memberId, members.id)))
+      .limit(1))[0];
+  }

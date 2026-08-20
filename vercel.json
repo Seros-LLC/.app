@@ -6,6 +6,22 @@
   "outputDirectory": "public",
   "rewrites": [
     {
+      "source": "/auth/google",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/auth/github",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/oauth/callback",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/oauth/error",
+      "destination": "/api/index"
+    },
+    {
       "source": "/(.*)",
       "destination": "/api/index"
     }

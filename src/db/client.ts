@@ -5,6 +5,21 @@
  * the environment contract. This file exists so that `import { openDb } from
  * '../db/client'` in a dozen modules did not have to change.
  */
-export { openDb, migrateDb, migrateDbAsync, closeDb, dialect, isPgUrl, applyPgMigrations, affectedRows,
-         migrationFiles, migrationsDir, pgClientOptions } from './driver';
-export type { Db, Dialect } from './driver';
+export { 
+  openDb, 
+  migrateDb, 
+  migrateDbAsync, 
+  closeDb, 
+  dialect, 
+  isPgUrl, 
+  applyPgMigrations, 
+  affectedRows,
+  migrationFiles, 
+  migrationsDir, 
+  pgClientOptions 
+} from './driver';
+
+export type { 
+  Dialect, 
+  Db 
+} from './driver';

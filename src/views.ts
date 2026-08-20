@@ -75,7 +75,15 @@ code{background:#eae3d8;padding:1px 5px;border-radius:2px;font-size:.86em}
   .card{padding:14px}
   input[type=text],input[type=date]{width:100%}
 }
-@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}/* OAuth buttons */
+.oauth-buttons{display:flex;gap:12px;margin-top:20px;flex-wrap:wrap}
+.oauth-btn{display:inline-block;padding:10px 20px;border-radius:3px;font:inherit;font-size:.78rem;
+  letter-spacing:.08em;text-transform:uppercase;text-decoration:none;cursor:pointer;border:1px solid}
+.google-btn{background:#fff;color:#757575;border-color:#ddd}
+.google-btn:hover{background:#f5f5f5;border-color:#bbb}
+.github-btn{background:#24292e;color:#fff;border-color:#24292e}
+.github-btn:hover{background:#2b3137;border-color:#1b1f23}
+
 `;
 
 export interface PageContext {

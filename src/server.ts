@@ -13,12 +13,40 @@ import {
 import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
 import { cronDrain } from './routes/cron';
 import { page } from './views';
+import { configurePassport, oauthCallback, oauthError } from './routes/oauth';
+import passport from 'passport';
+
 
 const PORT = Number(process.env.PORT || 3000);
 
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+
+  // Passport OAuth middleware
+  configurePassport();
+
+  // Passport session serialization
+  passport.serializeUser((user: any, done) => {
+    done(null, { memberId: user.memberId, workspaceId: user.workspaceId });
+  });
+
+  passport.deserializeUser(async (obj: any, done) => {
+    try {
+      const db = openDb();
+      const scope = await WorkspaceScope.open(db, obj.workspaceId);
+      const member = await scope.member(obj.memberId);
+      if (!member || member.status !== 'active') {
+        return done(null, false);
+      }
+      done(null, { memberId: obj.memberId, workspaceId: obj.workspaceId });
+    } catch (err) {
+      done(err);
+    }
+  });
+  app.use(passport.initialize());
+  app.use(passport.session());
+
   app.set('trust proxy', 1);
 
   // Verified over the exact bytes it parses, before any body parser can touch it.
@@ -49,6 +77,12 @@ export function createApp() {
   app.post('/set-password', rateLimit('setpw', 10, 60_000), setPasswordPost);
 
   // everything below this line needs a session
+  // OAuth routes (must be before requireSession)
+  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+  app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }));
+  app.get('/oauth/callback', oauthCallback);
+  app.get('/oauth/error', oauthError);
+
   app.use(asyncHandler(requireSession));
   app.get('/queue', queuePage);
   app.get('/tasks', tasksPage);

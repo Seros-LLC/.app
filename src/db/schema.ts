@@ -149,6 +149,19 @@ export const auditEvents = sqliteTable('audit_log', {
   at: integer('at').notNull(),                                 // brief `occurred_at`
 });
 
+export const oauthProviders = sqliteTable('oauth_providers', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  memberId: text('member_id').notNull().references(() => members.id),
+  provider: text('provider', { enum: ['google', 'github'] }).notNull(),
+  providerUserId: text('provider_user_id').notNull(),
+  email: text('email'),
+  name: text('name'),
+  createdAt: integer('created_at').notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.workspaceId, t.provider, t.providerUserId] }),
+  uniqueIndex('oauth_workspace_member').on(t.workspaceId, t.memberId),
+]);
+
 // The meter row is the cost record (migration 0002_meter_cost.sql, which owns
 // this table). Every added column has a default, so the old four-field insert in
 // WorkspaceScope.meter still compiles and still works. Contains no customer

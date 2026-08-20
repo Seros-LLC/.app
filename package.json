@@ -1,30 +1,15 @@
 {
   "name": "seros-app",
   "version": "1.0.0",
-  "description": "Seros: turns what a team already said into confirmed, owned, dated tasks. Human confirmation before any write.",
-  "main": "index.js",
+  "description": "",
+  "main": "dist/server.js",
   "scripts": {
-    "migrate": "tsx src/db/migrate.ts",
+    "build": "tsc",
+    "build:vercel": "npm run build",
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
-    "worker": "tsx src/worker.ts",
-    "sweep": "tsx src/sweep.ts",
-    "limits": "tsx src/limits-cli.ts",
-    "prune": "tsx src/prune.ts",
-    "test": "tsx --test tests/*.test.ts",
-    "eval": "tsx evals/detection.ts",
-    "typecheck": "tsc --noEmit",
-    "seed": "tsx src/seed.ts",
-    "check:tenancy": "tsx tools/check-tenancy.ts",
-    "verify": "npm run typecheck && npm run check:tenancy && npm test",
-    "build:vercel": "mkdir -p public && node -e \"require('fs').writeFileSync('public/.keep','')\"",
-    "set-password": "tsx src/auth-cli.ts set-password",
-    "invite": "tsx src/auth-cli.ts invite",
-    "auth": "tsx src/auth-cli.ts"
+    "start": "node dist/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@types/pg": "^8.23.1",
     "better-sqlite3": "^13.0.3",
@@ -32,9 +17,13 @@
     "express": "^5.2.1",
     "nodemon": "^3.1.14",
     "pg": "^8.23.0",
+    "postgres": "^3.4.9",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-github2": "^0.1.12"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -42,6 +31,6 @@
     "@types/node": "^26.2.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   }
 }
