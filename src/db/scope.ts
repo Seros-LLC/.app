@@ -23,9 +23,10 @@ import type { openDb } from './client';
 import { affectedRows } from './client';
 import { withTx } from './tx';
 import {
-  workspaces, members, sourceMessages, drafts, confirmations, tasks,
+  workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
   auditEvents, actionMeter, jobs,
 } from './schema';
+import { normaliseEmail } from '../password';
 
 type Db = ReturnType<typeof openDb>;
 
@@ -298,13 +299,13 @@ export class WorkspaceScope {
     return (await this.db.select().from(members)
       .where(and(eq(members.workspaceId, this.workspaceId), eq(members.id, id))).limit(1))[0];
   }
-}
   async memberByEmail(email: string) {
-    const { normaliseEmail } = await import('./password');
-    const e = normaliseEmail(email);
-    if (!e) return undefined;
+    const norm = normaliseEmail(email);
+    if (!norm) return undefined;
     return (await this.db.select().from(members)
-      .where(and(eq(members.workspaceId, this.workspaceId), eq(memberCredentials.email, e)))
+      .where(and(eq(members.workspaceId, this.workspaceId), eq(memberCredentials.email, norm)))
       .innerJoin(memberCredentials, and(eq(memberCredentials.workspaceId, this.workspaceId), eq(memberCredentials.memberId, members.id)))
       .limit(1))[0];
   }
+
+}

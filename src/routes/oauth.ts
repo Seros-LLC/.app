@@ -25,7 +25,7 @@ const WS = () => process.env.SEROS_WORKSPACE || 'demo';
 export function configurePassport() {
   // Google OAuth
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-    passport.use(new GoogleStrategy({
+    passport.use('google', new GoogleStrategy({
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: '/oauth/callback',
@@ -34,7 +34,7 @@ export function configurePassport() {
       try {
         const workspaceId = WS();
         const db = openDb();
-        const ws = await WorkspaceScope.ensure(db, workspaceId);
+        const ws = await WorkspaceScope.open(db, workspaceId);
 
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || email || 'Google User';
@@ -56,7 +56,7 @@ export function configurePassport() {
               // Check if they have a password-based account
               const memberByEmail = await ws.memberByEmail(email);
               if (memberByEmail) {
-                memberId = memberByEmail.memberId;
+                memberId = (memberByEmail as any).members.id;
               } else {
                 // Create new member
                 memberId = await ensureMemberForOAuth(db, workspaceId, email, name);
@@ -94,17 +94,17 @@ export function configurePassport() {
 
   // GitHub OAuth
   if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
-    passport.use(new GitHubStrategy({
+    passport.use('github', new GitHubStrategy({
       clientID: process.env.GITHUB_CLIENT_ID,
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
       callbackURL: '/oauth/callback',
-      scope: ['user:email'],
+      scope: '',
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
         const workspaceId = WS();
         const db = openDb();
-        const ws = await WorkspaceScope.ensure(db, workspaceId);
+        const ws = await WorkspaceScope.open(db, workspaceId);
 
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || profile.username || email || 'GitHub User';
@@ -126,7 +126,7 @@ export function configurePassport() {
               // Check if they have a password-based account
               const memberByEmail = await ws.memberByEmail(email);
               if (memberByEmail) {
-                memberId = memberByEmail.memberId;
+                memberId = (memberByEmail as any).members.id;
               } else {
                 // Create new member
                 memberId = await ensureMemberForOAuth(db, workspaceId, email, name);
@@ -166,13 +166,15 @@ export function configurePassport() {
 /**
  * OAuth callback handler - Passport authenticates the user, we log them in
  */
-export async function oauthCallback(req: Request, res: Response, next: NextFunction) {
-  passport.authenticate(['google', 'github'], (err: any, user: any) => {
+export async function oauthCallback(req: any, res: Response, next: NextFunction) {
+  const provider = req.query.provider as string;
+
+  passport.authenticate(provider, (err: any, user: any) => {
     if (err || !user) {
       return res.redirect(303, '/login?err=oauth_failed');
     }
 
-    req.logIn(user, async (loginErr: any) => {
+    (req as any).logIn(user, async (loginErr: any) => {
       if (loginErr) {
         console.error(JSON.stringify({ level: 'error', event: 'oauth.login.failed', error: String(loginErr) }));
         return res.redirect(303, '/login?err=oauth_failed');
@@ -189,7 +191,7 @@ export async function oauthCallback(req: Request, res: Response, next: NextFunct
 
         const scope = await WorkspaceScope.open(db, user.workspaceId);
         await scope.audit('session.oauth.login', 'ok', 
-          { member_id: user.memberId, provider: req.query.provider as string || 'unknown' },
+          { member_id: user.memberId, provider: provider || 'unknown' },
           { actorType: 'member', actorId: user.memberId, objectType: 'member', objectId: user.memberId }
         );
 

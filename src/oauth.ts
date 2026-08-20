@@ -5,7 +5,6 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import type { ReturnType } from './db/client';
 import { affectedRows } from './db/client';
 import { memberCredentials, oauthProviders, members } from './db/schema';
 
@@ -75,14 +74,14 @@ export async function findMemberByOAuth(db: Db, workspaceId: string, provider: O
 
   if (rows.length === 0) return null;
 
-  const row = rows[0];
+  const row = rows[0]!;
   const member = await db.select().from(members)
     .where(and(eq(members.workspaceId, workspaceId), eq(members.id, row.memberId)))
     .limit(1);
 
   if (member.length === 0) return null;
 
-  return { memberId: row.memberId, member: member[0] };
+  return { memberId: row.memberId, member: member[0]! } as { memberId: string; member: any };
 }
 
 /**
@@ -99,7 +98,7 @@ export async function findMemberByEmail(db: Db, workspaceId: string, email: stri
 
   if (rows.length === 0) return null;
 
-  return { memberId: rows[0].memberId };
+  return { memberId: rows[0]!.memberId } as { memberId: string };
 }
 
 /**
@@ -112,5 +111,5 @@ export async function getPasswordVersion(db: Db, workspaceId: string, memberId: 
       eq(memberCredentials.memberId, memberId)
     ))
     .limit(1);
-  return row[0]?.passwordSetAt ?? 0;
+  return (row[0]?.passwordSetAt ?? 0) as number;
 }

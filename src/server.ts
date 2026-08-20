@@ -15,6 +15,7 @@ import { cronDrain } from './routes/cron';
 import { page } from './views';
 import { configurePassport, oauthCallback, oauthError } from './routes/oauth';
 import passport from 'passport';
+import { WorkspaceScope } from './db/scope';
 
 
 const PORT = Number(process.env.PORT || 3000);
@@ -27,11 +28,11 @@ export function createApp() {
   configurePassport();
 
   // Passport session serialization
-  passport.serializeUser((user: any, done) => {
+  passport.serializeUser((user: any, done: any) => {
     done(null, { memberId: user.memberId, workspaceId: user.workspaceId });
   });
 
-  passport.deserializeUser(async (obj: any, done) => {
+  passport.deserializeUser(async (obj: any, done: any) => {
     try {
       const db = openDb();
       const scope = await WorkspaceScope.open(db, obj.workspaceId);
