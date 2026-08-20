@@ -25,9 +25,6 @@ import { eq } from 'drizzle-orm';
 
 migrateDb();
 const db = openDb();
-const scope = WorkspaceScope.ensure(db, 'sec', 'Security workspace');
-scope.addMember('u-owner', 'Owner', 'owner');
-scope.addMember('u-viewer', 'Viewer', 'viewer');
 
 // A session costs a secret now. These two are the only members with one, and the
 // password is what login() proves below; nothing else in this file changes.
@@ -35,20 +32,36 @@ const PASSWORDS: Record<string, string> = {
   'u-owner': 'owner-password-for-the-security-suite',
   'u-viewer': 'viewer-password-for-the-security-suite',
 };
-const credentials = MemberCredentials.for(db, scope);
-for (const [id, pw] of Object.entries(PASSWORDS)) credentials.setPassword(id, hashPasswordSync(pw));
+
+// Opening a workspace and writing a credential are promises now (they have to be:
+// on Postgres there is no synchronous .run()), and this file is CommonJS, so the
+// fixtures are a module-level promise that every caller awaits instead of a
+// floating top-level statement that may not have landed yet.
+const fixturesReady = (async () => {
+  const scope = await WorkspaceScope.ensure(db, 'sec', 'Security workspace');
+  await scope.addMember('u-owner', 'Owner', 'owner');
+  await scope.addMember('u-viewer', 'Viewer', 'viewer');
+  const credentials = MemberCredentials.for(db, scope);
+  for (const [id, pw] of Object.entries(PASSWORDS)) await credentials.setPassword(id, hashPasswordSync(pw));
+  return scope;
+})();
 
 const server = createApp().listen(0);
 const port = (server.address() as any).port;
 const url = (p: string) => `http://127.0.0.1:${port}${p}`;
 
 async function login(memberId: string): Promise<string> {
+  await fixturesReady;
   const r = await fetch(url('/login'), {
     method: 'POST', redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ identifier: memberId, password: PASSWORDS[memberId] ?? '' }).toString(),
   });
-  assert.equal(r.status, 303, `sign-in for ${memberId} was refused`);
+  if (r.status !== 303) {
+      const text = await r.text();
+      console.error(`Login failed for ${memberId}: status ${r.status}, body:`, text);
+    }
+    assert.equal(r.status, 303, `sign-in for ${memberId} was refused`);
   const c = r.headers.get('set-cookie') ?? '';
   return c.split(';')[0]!;
 }
@@ -57,10 +70,11 @@ async function tokenFrom(cookie: string): Promise<string> {
   return /name="csrf" value="([^"]+)"/.exec(html)?.[1] ?? '';
 }
 async function makeDraft(): Promise<string> {
-  const { row } = scope.ingestMessage({ channelId: 'C1', ts: String(Math.random()), authorId: 'u-owner', body: "I'll send the report by 2030-01-01." });
-  scope.enqueue('detect', { messageId: row.id });
+  const scope = await fixturesReady;
+  const { row } = await scope.ingestMessage({ channelId: 'C1', ts: String(Math.random()), authorId: 'u-owner', body: "I'll send the report by 2030-01-01." });
+  await scope.enqueue('detect', { messageId: row.id });
   while (await tick(db)) { /* drain */ }
-  return scope.pendingDrafts()[0]!.id;
+  return (await scope.pendingDrafts())[0]!.id;
 }
 
 test('CRITICAL 1a: an anonymous request cannot reach the queue', async () => {
@@ -142,7 +156,7 @@ test('CRITICAL 3: a signed event for an unknown workspace cannot conjure a tenan
     body,
   });
   assert.equal(r.status, 404);
-  assert.throws(() => WorkspaceScope.open(db, 'T-victim-corp'));
+  await assert.rejects(() => WorkspaceScope.open(db, 'T-victim-corp'));
 });
 
 test('CRITICAL 4: the bytes that are verified are the bytes that are parsed', async () => {
@@ -176,8 +190,9 @@ test('CRITICAL 5b: a confirmation by a non-member is refused by the database', (
   }, /FOREIGN KEY/i);
 });
 
-test('CRITICAL 2: two claimants never receive the same job', () => {
-  const id = scope.enqueue('detect', { messageId: 'nope' });
+test('CRITICAL 2: two claimants never receive the same job', async () => {
+  const scope = await fixturesReady;
+  const id = await scope.enqueue('detect', { messageId: 'nope' });
   const a = claimNextJob(db, ['detect']);
   const b = claimNextJob(db, ['detect']);
   assert.ok(a);

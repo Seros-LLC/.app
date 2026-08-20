@@ -34,7 +34,9 @@ import {
 
 migrateDb();
 const db = openDb();
-const scope = WorkspaceScope.ensure(db, 'replay-ws', 'Replay workspace');
+// async on both drivers now, so the workspace is a module-level promise the
+// request handler awaits (this file is CommonJS: no top-level await).
+const scopeReady = WorkspaceScope.ensure(db, 'replay-ws', 'Replay workspace');
 
 const MAX_AGE_SEC = 300;
 const SECRET_TEXT = "I'll wire the payment to the new account tomorrow";
@@ -44,7 +46,7 @@ const SECRET_TEXT = "I'll wire the payment to the new account tomorrow";
  * Deliberately a copy: the parent owns src/routes/webhook.ts.
  */
 const app = express();
-app.post('/api/slack/events', express.raw({ type: '*/*', limit: '128kb' }), (req, res) => {
+app.post('/api/slack/events', express.raw({ type: '*/*', limit: '128kb' }), async (req, res) => {
   const raw: string = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
   const sig = req.header('x-slack-signature');
   const ts = req.header('x-slack-request-timestamp');
@@ -58,13 +60,14 @@ app.post('/api/slack/events', express.raw({ type: '*/*', limit: '128kb' }), (req
   if (!crypto.timingSafeEqual(expected, given)) return res.status(401).json({ ok: false, error: 'bad_signature' });
 
   // ---- the wiring under test ----
-  if (!checkAndRecordReplay(db, sig, tsNum).fresh) {
+  if (!(await checkAndRecordReplay(db, sig, tsNum)).fresh) {
     return res.status(409).json({ ok: false, error: 'replayed_signature' });
   }
 
   const b = JSON.parse(raw);
   const ev = b.event ?? b;
-  const { row, created } = scope.ingestMessage({
+  const scope = await scopeReady;
+  const { row, created } = await scope.ingestMessage({
     channelId: ev.channel, ts: String(ev.ts), authorId: ev.user, body: String(ev.text ?? ''),
   });
   return res.json({ ok: true, messageId: row.id, deduped: !created });
@@ -138,54 +141,54 @@ test('H5b: two different signed requests both succeed', async () => {
   assert.notEqual((await ra.json() as any).messageId, (await rb.json() as any).messageId);
 });
 
-test('H5c: a fresh signature is recorded once and refused thereafter (unit level)', () => {
+test('H5c: a fresh signature is recorded once and refused thereafter (unit level)', async () => {
   const sig = 'v0=' + crypto.randomBytes(32).toString('hex');
   const ts = Math.floor(Date.now() / 1000);
-  const first = checkAndRecordReplay(db, sig, ts);
+  const first = await checkAndRecordReplay(db, sig, ts);
   assert.equal(first.fresh, true);
   assert.equal(first.reason, undefined);
-  assert.equal(checkAndRecordReplay(db, sig, ts).fresh, false);
-  assert.equal(checkAndRecordReplay(db, sig, ts).reason, 'replayed_signature');
+  assert.equal((await checkAndRecordReplay(db, sig, ts)).fresh, false);
+  assert.equal((await checkAndRecordReplay(db, sig, ts)).reason, 'replayed_signature');
 });
 
-test('H5d: an empty signature or an unusable timestamp is never fresh', () => {
-  assert.deepEqual(checkAndRecordReplay(db, '', 1).reason, 'missing_signature');
-  assert.deepEqual(checkAndRecordReplay(db, 'v0=abc', Number.NaN).reason, 'bad_timestamp');
+test('H5d: an empty signature or an unusable timestamp is never fresh', async () => {
+  assert.deepEqual((await checkAndRecordReplay(db, '', 1)).reason, 'missing_signature');
+  assert.deepEqual((await checkAndRecordReplay(db, 'v0=abc', Number.NaN)).reason, 'bad_timestamp');
 });
 
-test('H5e: expired entries are pruned, pruning is idempotent, and the store stays bounded', () => {
+test('H5e: expired entries are pruned, pruning is idempotent, and the store stays bounded', async () => {
   const now = Date.now();
   const long_ago = now - (REPLAY_WINDOW_SEC * 1000) - 60_000;
 
   // 200 signatures seen well outside the window
   for (let i = 0; i < 200; i++) {
     const sig = 'v0=' + crypto.randomBytes(32).toString('hex');
-    assert.equal(checkAndRecordReplay(db, sig, Math.floor(long_ago / 1000), long_ago).fresh, true);
+    assert.equal((await checkAndRecordReplay(db, sig, Math.floor(long_ago / 1000), long_ago)).fresh, true);
   }
-  assert.ok(replayNonceCount(db) >= 200);
+  assert.ok(await replayNonceCount(db) >= 200);
 
-  const removed = pruneReplayNonces(db, now);
+  const removed = await pruneReplayNonces(db, now);
   assert.ok(removed >= 200, `expected >=200 pruned, got ${removed}`);
   // idempotent: a second prune with the same clock removes nothing and throws nothing
-  assert.equal(pruneReplayNonces(db, now), 0);
-  assert.equal(pruneReplayNonces(db, now), 0);
+  assert.equal(await pruneReplayNonces(db, now), 0);
+  assert.equal(await pruneReplayNonces(db, now), 0);
 
   // an expired signature is spendable again — the store is a window, not a ledger
   const old_sig = 'v0=' + crypto.randomBytes(32).toString('hex');
   const t0 = now - (REPLAY_WINDOW_SEC * 1000) - 10_000;
-  assert.equal(checkAndRecordReplay(db, old_sig, Math.floor(t0 / 1000), t0).fresh, true);
-  assert.equal(checkAndRecordReplay(db, old_sig, Math.floor(t0 / 1000), t0).fresh, false);
-  assert.equal(checkAndRecordReplay(db, old_sig, Math.floor(now / 1000), now).fresh, true);
+  assert.equal((await checkAndRecordReplay(db, old_sig, Math.floor(t0 / 1000), t0)).fresh, true);
+  assert.equal((await checkAndRecordReplay(db, old_sig, Math.floor(t0 / 1000), t0)).fresh, false);
+  assert.equal((await checkAndRecordReplay(db, old_sig, Math.floor(now / 1000), now)).fresh, true);
 
   // bounded: 500 more inserts, all expired, leave the table at window size, not traffic size
-  const settled = replayNonceCount(db);
+  const settled = await replayNonceCount(db);
   for (let i = 0; i < 500; i++) {
-    checkAndRecordReplay(db, 'v0=' + crypto.randomBytes(32).toString('hex'),
+    await checkAndRecordReplay(db, 'v0=' + crypto.randomBytes(32).toString('hex'),
       Math.floor(long_ago / 1000), long_ago);
   }
-  pruneReplayNonces(db, now);
-  assert.ok(replayNonceCount(db) <= settled + 1,
-    `store grew without bound: ${replayNonceCount(db)} vs ${settled}`);
+  await pruneReplayNonces(db, now);
+  assert.ok((await replayNonceCount(db)) <= settled + 1,
+    `store grew without bound: ${await replayNonceCount(db)} vs ${settled}`);
 });
 
 test('H5f: the store holds a hash only — never message text, never the raw signature', async () => {

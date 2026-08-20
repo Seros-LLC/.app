@@ -170,6 +170,41 @@ A tenant at a cap is refused loudly with a 429 and an audited `denied`, never si
 dropped. An expired draft can never become a confirmed one: expiry only moves
 `pending -> expired`, and `confirm()` refuses anything that is not pending.
 
+## Deploying to Vercel
+
+The whole app ships as **one serverless function**. `api/index.ts` wraps the same
+express app used locally, and `vercel.json` rewrites `/(.*)` to `/api/index`, so every
+route — pages, webhook, cron — lands in that single handler. There is no separate build
+output; `build:vercel` only creates an empty `public/` for the static directory.
+
+Required production environment variables:
+
+| Variable | What it is |
+|---|---|
+| `DATABASE_URL` | pooled Postgres connection string; its presence is what selects Postgres |
+| `DATABASE_URL_UNPOOLED` | direct connection, used for migrations and anything a pooler cannot carry |
+| `SEROS_SESSION_SECRET` | signs session cookies |
+| `SEROS_SIGNING_SECRET` | signs webhook and internal payloads |
+| `CRON_SECRET` | the value Vercel Cron presents to `/api/cron/drain`; requests without it are refused |
+
+**Migrations run on cold start.** The function applies `.seros/migrations/*.sql` in
+order before serving, exactly as `npm run migrate` does, and the migrations are
+idempotent — a warm instance, a second region or a concurrent boot re-applies nothing.
+
+**Getting a login.** There is no member list and no session without a credential, so
+create one deliberately:
+
+```bash
+npm run seed                      # demo workspace + members, prints the passwords once
+npm run set-password -- <memberId>  # set or reset one member's password
+```
+
+Run these against the deployed database by pointing `DATABASE_URL` at it.
+
+**Local dev uses SQLite, production uses Postgres**, and `DATABASE_URL` is the switch:
+unset, the app opens `.seros/seros.db`; set, it connects to Postgres. The schema is the
+same either way, which is why the local suite is evidence about production.
+
 ## Not done yet
 
 * **Sign-in is a real password now** — the hole this section used to describe is closed.

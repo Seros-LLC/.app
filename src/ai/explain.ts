@@ -112,13 +112,13 @@ export async function explainDraft(
   try {
     const out = await explainCommitment(db, scope.workspaceId, { body, draftId });
     if (out.reason === null) {
-      scope.audit('draft.reason_unavailable', 'failed', { draft_id: draftId, reason: out.why ?? 'unknown' });
+      await scope.audit('draft.reason_unavailable', 'failed', { draft_id: draftId, reason: out.why ?? 'unknown' });
       return null;
     }
     if (typeof scope.setDraftReason === 'function') {
       scope.setDraftReason(draftId, out.reason, out.promptVersion);
       // Words, not the words themselves: audit rows carry no content (invariant 14).
-      scope.audit('draft.reason_stored', 'ok', { draft_id: draftId, words: words(out.reason) });
+      await scope.audit('draft.reason_stored', 'ok', { draft_id: draftId, words: words(out.reason) });
     }
     return out.reason;
   } catch (e: any) {

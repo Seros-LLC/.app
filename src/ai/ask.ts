@@ -74,7 +74,7 @@ export async function ask(
   // Nothing retrieved, nothing to answer from: the model is never asked (and never
   // billed) to have an opinion about an empty workspace.
   if (isEmpty(retrieved)) {
-    scope.audit('ask.no_data', 'ok', { rows: 0, question_chars: question.length });
+    await scope.audit('ask.no_data', 'ok', { rows: 0, question_chars: question.length });
     return { ...base, outcome: { kind: 'no_data' } };
   }
 
@@ -94,7 +94,7 @@ export async function ask(
       res.outcome === 'invalid_output' ? 'invalid_output'
       : res.outcome === 'budget_blocked' ? 'budget_blocked'
       : 'provider_unavailable';
-    scope.audit('ask.degraded', 'failed', { reason: why, provider_outcome: res.outcome, rows: retrieved.rows.length });
+    await scope.audit('ask.degraded', 'failed', { reason: why, provider_outcome: res.outcome, rows: retrieved.rows.length });
     return {
       question, retrieved, meterId: res.meterId, modelCalled: true,
       outcome: { kind: 'degraded', why, providerOutcome: res.outcome },
@@ -105,7 +105,7 @@ export async function ask(
   if (!citationsWithin(res.value.answer, res.value.citedIds, allowed)) {
     // The answer referred to work this workspace did not hand it. There is no
     // version of that which is safe to show, so it is thrown away whole.
-    scope.audit('ask.citation_rejected', 'denied', {
+    await scope.audit('ask.citation_rejected', 'denied', {
       reason: 'unknown_citation', cited: res.value.citedIds.length, rows: retrieved.rows.length,
     });
     return {
@@ -125,7 +125,7 @@ export async function ask(
     if (mem && !citedMembers.includes(mem)) citedMembers.push(mem);
   }
 
-  scope.audit('ask.answered', 'ok', {
+  await scope.audit('ask.answered', 'ok', {
     rows: retrieved.rows.length, cited: cited.length, question_chars: question.length,
   });
   return {

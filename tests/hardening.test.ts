@@ -19,19 +19,27 @@ import { and, eq } from 'drizzle-orm';
 
 migrateDb();
 const db = openDb();
-const scope = WorkspaceScope.ensure(db, 'hard', 'Hardening');
-scope.addMember('u-me', 'Me', 'owner');
+// Opening a workspace and adding a member are promises now (there is no
+// synchronous .run() on Postgres) and this file is CommonJS, so the fixture is a
+// module-level promise that every caller awaits.
+const scopeReady = (async () => {
+  const s = await WorkspaceScope.ensure(db, 'hard', 'Hardening');
+  await s.addMember('u-me', 'Me', 'owner');
+  return s;
+})();
 
 async function pendingDraft(text = "I'll send the report by 2030-01-01.") {
-  const { row } = scope.ingestMessage({ channelId: 'C1', ts: String(Math.random()), authorId: 'u-me', body: text });
-  scope.enqueue('detect', { messageId: row.id });
+  const scope = await scopeReady;
+  const { row } = await scope.ingestMessage({ channelId: 'C1', ts: String(Math.random()), authorId: 'u-me', body: text });
+  await scope.enqueue('detect', { messageId: row.id });
   while (await tick(db)) { /* drain */ }
-  return scope.pendingDrafts()[0]!;
+  return (await scope.pendingDrafts())[0]!;
 }
 
 test('M9: the idempotency key is unique, enforced by the database', async () => {
   const d = await pendingDraft();
-  const r: any = scope.confirm(d.id, 'confirmed', 'u-me');
+  const scope = await scopeReady;
+  const r: any = await scope.confirm(d.id, 'confirmed', 'u-me');
   const t = db.select().from(tasks).where(eq(tasks.confirmationId, r.confirmationId)).get()!;
   assert.throws(() => {
     db.insert(tasks).values({
@@ -42,8 +50,9 @@ test('M9: the idempotency key is unique, enforced by the database', async () => 
   }, /UNIQUE/i);
 });
 
-test('M4: a job orphaned by a dead worker is returned to the queue, not stranded', () => {
-  const id = scope.enqueue('detect', { messageId: 'nothing' });
+test('M4: a job orphaned by a dead worker is returned to the queue, not stranded', async () => {
+  const scope = await scopeReady;
+  const id = await scope.enqueue('detect', { messageId: 'nothing' });
   const claimed = claimNextJob(db, ['detect'])!;
   assert.equal(claimed.id, id);
   assert.equal(claimed.status, 'running');
@@ -57,7 +66,8 @@ test('M4: a job orphaned by a dead worker is returned to the queue, not stranded
 
 test('M6: editing on confirm records which fields moved, and no values', async () => {
   const d = await pendingDraft("I'll draft the summary.");
-  scope.confirm(d.id, 'confirmed_with_edits', 'u-me', {
+  const scope = await scopeReady;
+  await scope.confirm(d.id, 'confirmed_with_edits', 'u-me', {
     title: 'A completely different title', outcome: d.outcome,
     suggestedOwner: d.suggestedOwner, suggestedDueDate: '2031-02-03',
   });
@@ -72,8 +82,9 @@ test('M6: editing on confirm records which fields moved, and no values', async (
 test('M13: a nonsense detection threshold fails loudly instead of accepting everything', async () => {
   const before = process.env.SEROS_DETECT_THRESHOLD;
   process.env.SEROS_DETECT_THRESHOLD = 'high';
-  const { row } = scope.ingestMessage({ channelId: 'C1', ts: String(Math.random()), authorId: 'u-me', body: 'Nice work everyone.' });
-  scope.enqueue('detect', { messageId: row.id });
+  const scope = await scopeReady;
+  const { row } = await scope.ingestMessage({ channelId: 'C1', ts: String(Math.random()), authorId: 'u-me', body: 'Nice work everyone.' });
+  await scope.enqueue('detect', { messageId: row.id });
   await tick(db);                                   // the job fails rather than drafting
   const job = db.select().from(jobs).where(eq(jobs.workspaceId, 'hard')).all().find((j) => JSON.parse(j.payload).messageId === row.id)!;
   assert.notEqual(job.status, 'done');

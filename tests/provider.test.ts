@@ -62,8 +62,8 @@ async function withRealProvider<T>(host: string, body: () => Promise<T>): Promis
   }
 }
 
-function workspace(id: string, budgets: { daily?: number; monthly?: number } = {}): MeterContext {
-  WorkspaceScope.ensure(db, id);
+async function workspace(id: string, budgets: { daily?: number; monthly?: number } = {}): Promise<MeterContext> {
+  await WorkspaceScope.ensure(db, id);
   db.update(workspaces)
     .set({ dailyBudgetCents: budgets.daily ?? 0, monthlyBudgetCents: budgets.monthly ?? 0 })
     .where(eq(workspaces.id, id)).run();
@@ -118,7 +118,7 @@ test('complete() refuses to run without a meter context, and spends nothing', as
 });
 
 test('an ok call writes exactly one meter row, priced and attributed', async () => {
-  const meter = workspace('T-ok');
+  const meter = await workspace('T-ok');
   const r = await complete(meter, detectReq(), DetectionSchema);
 
   assert.equal(r.ok, true);
@@ -143,14 +143,14 @@ test('an ok call writes exactly one meter row, priced and attributed', async () 
 });
 
 test('two calls write two meter rows', async () => {
-  const meter = workspace('T-two');
+  const meter = await workspace('T-two');
   await complete(meter, detectReq(), DetectionSchema);
   await complete(meter, detectReq('We will ship on Friday.'), DetectionSchema);
   assert.equal(meterRows('T-two').length, 2);
 });
 
 test('a workspace at 100% of its daily budget is refused BEFORE the network call and metered budget_blocked', async () => {
-  const meter = workspace('T-daily', { daily: 5 });          // 5 cents
+  const meter = await workspace('T-daily', { daily: 5 });          // 5 cents
   seedSpend('T-daily', 5 * MICROS_PER_CENT);                 // already spent 100%
   const before = requests;
 
@@ -169,7 +169,7 @@ test('a workspace at 100% of its daily budget is refused BEFORE the network call
 });
 
 test('a workspace under its daily budget is allowed, and crossing the cap stops the next call', async () => {
-  const meter = workspace('T-edge', { daily: 1 });           // 1 cent = 10_000 micros
+  const meter = await workspace('T-edge', { daily: 1 });           // 1 cent = 10_000 micros
   const first = await complete(meter, detectReq(), DetectionSchema);
   assert.equal(first.outcome, 'ok', 'under the cap the call runs');
 
@@ -184,7 +184,7 @@ test('a workspace under its daily budget is allowed, and crossing the cap stops 
 });
 
 test('a budget of 0 means unlimited, however much has been spent', async () => {
-  const meter = workspace('T-unlimited', { daily: 0, monthly: 0 });
+  const meter = await workspace('T-unlimited', { daily: 0, monthly: 0 });
   seedSpend('T-unlimited', 500_000 * MICROS_PER_CENT);       // 5000 dollars today
   const r = await complete(meter, detectReq(), DetectionSchema);
   assert.equal(r.outcome, 'ok', '0 is unlimited, not "zero budget"');
@@ -196,7 +196,7 @@ test('a budget of 0 means unlimited, however much has been spent', async () => {
 });
 
 test('the monthly cap stops calls too, and is metered budget_blocked', async () => {
-  const meter = workspace('T-monthly', { daily: 0, monthly: 3 });
+  const meter = await workspace('T-monthly', { daily: 0, monthly: 3 });
   seedSpend('T-monthly', 3 * MICROS_PER_CENT);
   const r = await complete(meter, detectReq(), DetectionSchema);
   assert.equal(r.outcome, 'budget_blocked');
@@ -204,7 +204,7 @@ test('the monthly cap stops calls too, and is metered budget_blocked', async () 
 });
 
 test('a provider outage is metered as provider_error, never as ok, and invents no answer', async () => {
-  const meter = workspace('T-outage');
+  const meter = await workspace('T-outage');
   const r = await withRealProvider('http://127.0.0.1:1', () => complete(meter, detectReq(), DetectionSchema));
 
   assert.equal(r.ok, false);
@@ -219,7 +219,7 @@ test('a provider outage is metered as provider_error, never as ok, and invents n
 });
 
 test('a provider timeout is metered as timeout, exactly once', async () => {
-  const meter = workspace('T-timeout');
+  const meter = await workspace('T-timeout');
   handler = () => { /* never responds */ };
   try {
     const r = await withRealProvider(await stubUrl(), () =>
@@ -239,7 +239,7 @@ test('a provider timeout is metered as timeout, exactly once', async () => {
 });
 
 test('output that fails the schema is metered as invalid_output, exactly once', async () => {
-  const meter = workspace('T-invalid');
+  const meter = await workspace('T-invalid');
   handler = (_q, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ message: { content: JSON.stringify({ nonsense: true }) } }));
@@ -255,7 +255,7 @@ test('output that fails the schema is metered as invalid_output, exactly once', 
 });
 
 test('output that is not JSON at all is metered as invalid_output', async () => {
-  const meter = workspace('T-notjson');
+  const meter = await workspace('T-notjson');
   handler = (_q, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ message: { content: 'I am not JSON' } }));
@@ -275,7 +275,7 @@ test('every outcome is metered exactly once: five paths, five rows, one per call
 });
 
 test('a hard stop stops model calls only: ingest holds messages, confirmation and tracker writes keep working', async () => {
-  const scope = WorkspaceScope.ensure(db, 'T-stopped');
+  const scope = await WorkspaceScope.ensure(db, 'T-stopped');
   db.update(workspaces).set({ dailyBudgetCents: 2, monthlyBudgetCents: 0 })
     .where(eq(workspaces.id, 'T-stopped')).run();
   seedSpend('T-stopped', 2 * MICROS_PER_CENT);
@@ -286,18 +286,18 @@ test('a hard stop stops model calls only: ingest holds messages, confirmation an
   assert.equal(r.outcome, 'budget_blocked');
 
   // ingest: still accepted and HELD, not discarded
-  const msg = scope.ingestMessage({ channelId: 'C1', ts: '900.1', authorId: 'u-ana', body: "I'll send the deck." });
+  const msg = await scope.ingestMessage({ channelId: 'C1', ts: '900.1', authorId: 'u-ana', body: "I'll send the deck." });
   assert.equal(msg.created, true);
-  assert.ok(scope.messageById(msg.row.id));
+  assert.ok(await scope.messageById(msg.row.id));
 
   // confirmation and the tracker write path: untouched by the budget stop
-  scope.addMember('u-ana', 'Ana', 'confirmer');
-  const draftId = scope.createDraft({
+  await scope.addMember('u-ana', 'Ana', 'confirmer');
+  const draftId = await scope.createDraft({
     sourceMessageId: msg.row.id, title: 'Send the deck', outcome: 'deck sent',
     kind: 'commitment', confidence: 80, suggestedOwner: 'u-ana',
     suggestedDueDate: null, provider: 'human',
   });
-  const confirmed = scope.confirm(draftId, 'confirmed', 'u-ana');
+  const confirmed = await scope.confirm(draftId, 'confirmed', 'u-ana');
   assert.equal(confirmed.ok, true);
   const task = db.select().from(tasks)
     .where(and(eq(tasks.workspaceId, 'T-stopped'), eq(tasks.confirmationId, (confirmed as any).confirmationId))).get();
@@ -308,8 +308,8 @@ test('a hard stop stops model calls only: ingest holds messages, confirmation an
 });
 
 test('the meter context is per workspace: one workspace cannot spend another\'s budget', async () => {
-  const rich = workspace('T-rich', { daily: 0 });
-  const poor = workspace('T-poor', { daily: 1 });
+  const rich = await workspace('T-rich', { daily: 0 });
+  const poor = await workspace('T-poor', { daily: 1 });
   seedSpend('T-poor', 1 * MICROS_PER_CENT);
 
   assert.equal((await complete(rich, detectReq(), DetectionSchema)).outcome, 'ok');

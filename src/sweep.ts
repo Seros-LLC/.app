@@ -4,13 +4,13 @@
  * Runs the sweeper for every workspace, prints COUNTS ONLY, never content.
  * Exits non-zero if any workspace still has rows past its window (invariant 24: alert).
  */
-import { migrateDb, openDb } from './db/client';
+import { migrateDbAsync, openDb } from './db/client';
 import { sweepAllWorkspaces } from './retention';
 
-function main() {
-  migrateDb();
+async function main() {
+  await migrateDbAsync();
   const db = openDb();
-  const results = sweepAllWorkspaces(db);
+  const results = await sweepAllWorkspaces(db);
   let stragglers = 0;
   for (const r of results) {
     stragglers += r.rowsPastWindowAfterSweep;
@@ -27,4 +27,7 @@ function main() {
   if (stragglers > 0) process.exitCode = 1;
 }
 
-main();
+main().catch((err) => {
+  console.error(JSON.stringify({ level: 'error', event: 'sweep.failed', error: String(err?.message ?? err) }));
+  process.exitCode = 1;
+});

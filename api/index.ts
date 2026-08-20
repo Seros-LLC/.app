@@ -6,18 +6,25 @@
  * written to be a no-op when it has already run.
  */
 import { createApp } from '../src/server';
-import { migrateDb } from '../src/db/client';
+import { migrateDbAsync } from '../src/db/client';
 
-let ready = false;
-function boot() {
-  if (ready) return;
-  if (process.env.SEROS_SKIP_MIGRATE !== '1') migrateDb();
-  ready = true;
+// On Postgres the migration is asynchronous, so the first request must WAIT for
+// it instead of racing it: one promise per cold start, awaited by every request
+// until it settles. A failed migration is not cached as success - the next
+// request retries rather than serving a half-built schema forever.
+let booting: Promise<void> | undefined;
+function boot(): Promise<void> {
+  if (process.env.SEROS_SKIP_MIGRATE === '1') return Promise.resolve();
+  booting ??= migrateDbAsync().then(() => undefined).catch((err) => {
+    booting = undefined;
+    throw err;
+  });
+  return booting;
 }
 
 const app = createApp();
 
-export default function handler(req: any, res: any) {
-  boot();
+export default async function handler(req: any, res: any) {
+  await boot();
   return app(req, res);
 }

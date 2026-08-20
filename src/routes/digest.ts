@@ -89,7 +89,7 @@ export function renderDigest(d: DigestResult): string {
 
 export async function digestPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
+  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
   let result: DigestResult;
   try {
     result = await digest(db, scope);

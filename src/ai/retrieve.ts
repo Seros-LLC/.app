@@ -30,7 +30,7 @@ export const QUESTION_MAX_CHARS = 300;
 /** Hard ceiling on the FACTS block handed to the model, characters. */
 export const FACTS_MAX_CHARS = 6000;
 
-type DraftRow = ReturnType<WorkspaceScope['pendingDrafts']>[number];
+type DraftRow = Awaited<ReturnType<WorkspaceScope['pendingDrafts']>>[number];
 
 /**
  * What these features need from a scope. `draftsByState` does not exist on

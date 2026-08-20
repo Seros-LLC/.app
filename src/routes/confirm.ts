@@ -18,7 +18,7 @@ const Body = z.object({
   due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')),
 });
 
-export function confirmHandler(req: Request, res: Response) {
+export async function confirmHandler(req: Request, res: Response) {
   const s = req.session!;                    // requireSession + requireCsrf ran already
   const parsed = Body.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -27,22 +27,22 @@ export function confirmHandler(req: Request, res: Response) {
   const { draftId, decision, title, outcome, owner, due } = parsed.data;
 
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
 
-  const me = scope.member(s.memberId);
+  const me = await scope.member(s.memberId);
   if (!me || me.status !== 'active') return res.status(403).send('not an active member');
   if (me.role === 'viewer') {
-    scope.audit('draft.confirm_denied', 'denied', { member_id: me.id, draft_id: draftId },
-                { actorType: 'member', actorId: me.id, objectType: 'draft', objectId: draftId });
+    await scope.audit('draft.confirm_denied', 'denied', { member_id: me.id, draft_id: draftId },
+                      { actorType: 'member', actorId: me.id, objectType: 'draft', objectId: draftId });
     return res.status(403).send('your role cannot confirm');
   }
 
-  const d = scope.draft(draftId);
+  const d = await scope.draft(draftId);
   if (!d) return res.status(404).send('no such draft');
 
   // A human may type any date they like, but it is still checked against the message
   // rather than trusted, exactly as the model's suggestion was.
-  const dueClean = due ? sanitizeDueDate(scope.messageById(d.sourceMessageId)?.body ?? '', due) ?? due : null;
+  const dueClean = due ? sanitizeDueDate((await scope.messageById(d.sourceMessageId))?.body ?? '', due) ?? due : null;
 
   const nextTitle = title ?? d.title;
   const nextOutcome = outcome ?? d.outcome;
@@ -52,7 +52,7 @@ export function confirmHandler(req: Request, res: Response) {
      nextOwner !== (d.suggestedOwner || null) || dueClean !== (d.suggestedDueDate || null));
 
   const kind = decision === 'reject' ? 'rejected' : edited ? 'confirmed_with_edits' : 'confirmed';
-  const r = scope.confirm(draftId, kind, me.id, {
+  const r = await scope.confirm(draftId, kind, me.id, {
     title: nextTitle, outcome: nextOutcome, suggestedOwner: nextOwner, suggestedDueDate: dueClean,
   });
   if (!r.ok) return res.status(409).send(r.reason);

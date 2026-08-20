@@ -17,7 +17,9 @@ import { createApp } from '../src/server';
 
 migrateDb();
 const db = openDb();
-const scope = WorkspaceScope.ensure(db, 'cron', 'Cron workspace');
+// async on both drivers now, so the workspace is a module-level promise the
+// tests await (this file is CommonJS: there is no top-level await here).
+const scopeReady = WorkspaceScope.ensure(db, 'cron', 'Cron workspace');
 const server = createApp().listen(0);
 const port = (server.address() as any).port;
 const url = (p: string) => `http://127.0.0.1:${port}${p}`;
@@ -43,15 +45,16 @@ test('the cron endpoint accepts the shared secret and reports an empty queue hon
 });
 
 test('the cron endpoint drains queued work, and is bounded', async () => {
-  const { row } = scope.ingestMessage({ channelId: 'C1', ts: '1.1', authorId: 'u1', body: "I'll send the report by 2030-01-01." });
-  scope.enqueue('detect', { messageId: row.id });
+  const scope = await scopeReady;
+  const { row } = await scope.ingestMessage({ channelId: 'C1', ts: '1.1', authorId: 'u1', body: "I'll send the report by 2030-01-01." });
+  await scope.enqueue('detect', { messageId: row.id });
   const r = await fetch(url('/api/cron/drain'), {
     method: 'POST', headers: { authorization: 'Bearer cron-shared-secret-value' },
   });
   const j: any = await r.json();
   assert.equal(j.ok, true);
   assert.ok(j.drained >= 1, 'it should have done the queued job');
-  assert.equal(scope.pendingDrafts().length, 1);
+  assert.equal((await scope.pendingDrafts()).length, 1);
 });
 
 test('the platform cron header is accepted, since Vercel signs its own invocations', async () => {

@@ -8,9 +8,9 @@ import { csrfToken } from '../auth';
 import { reasonLine, reasonsFor } from '../ai/explain';
 
 /** Who is signed in, plus anything the layout needs. Every page gets one. */
-export function pageCtx(req: any, scope: any, flash?: string): PageContext {
+export async function pageCtx(req: Request, scope: WorkspaceScope, flash?: string): Promise<PageContext> {
   const s = req.session;
-  const m = s ? scope.member(s.memberId) : null;
+  const m = s ? await scope.member(s.memberId) : null;
   return {
     member: m ? { id: m.id, name: m.name, role: m.role } : undefined,
     csrf: s ? csrfToken(s) : undefined,
@@ -18,14 +18,14 @@ export function pageCtx(req: any, scope: any, flash?: string): PageContext {
   };
 }
 
-export function queuePage(req: Request, res: Response) {
+export async function queuePage(req: Request, res: Response) {
   const s = req.session!;                       // requireSession guarantees this
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
-  const me = scope.member(s.memberId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
+  const me = await scope.member(s.memberId);
   const canConfirm = !!me && me.status === 'active' && me.role !== 'viewer';
   const token = csrfToken(s);
-  const rows = scope.pendingDrafts();
+  const rows = await scope.pendingDrafts();
   const reasons = reasonsFor(scope, rows.map((d) => d.id));
   const flash = typeof req.query.msg === 'string' ? req.query.msg.slice(0, 200) : '';
 
@@ -58,13 +58,13 @@ export function queuePage(req: Request, res: Response) {
           : `<span class="pill">read only — your role cannot confirm</span>`}
       </div>
     </form>`).join('')}`;
-  res.type('html').send(page('Confirm queue', '/queue', body, pageCtx(req, scope, flash)));
+  res.type('html').send(page('Confirm queue', '/queue', body, await pageCtx(req, scope, flash)));
 }
 
-export function tasksPage(req: Request, res: Response) {
+export async function tasksPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
-  const rows = scope.taskRows();
+  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
+  const rows = await scope.taskRows();
 
   const body = `<h1>Tasks</h1>
   <p class="sub">Every row here has a confirmation behind it. There is no other way for one to exist.</p>
@@ -74,13 +74,13 @@ export function tasksPage(req: Request, res: Response) {
       <td>${esc(t.due ?? '—')}</td><td>${esc(t.memberId)}</td>
       <td><span class="pill ${t.writeState === 'created' ? 'ok' : ''}">${esc(t.writeState)}</span></td></tr>`).join('')}
   </table></div>`}`;
-  res.type('html').send(page('Tasks', '/tasks', body, pageCtx(req, scope)));
+  res.type('html').send(page('Tasks', '/tasks', body, await pageCtx(req, scope)));
 }
 
-export function auditPage(req: Request, res: Response) {
+export async function auditPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
-  const rows = scope.auditRows();
+  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
+  const rows = await scope.auditRows();
   const body = `<h1>Audit log</h1>
   <p class="sub">Append-only. Identifiers only — no message content ever reaches this table.</p>
   ${rows.length === 0 ? '<div class="empty">Nothing recorded yet.</div>' : `<div class="tablewrap"><table>
@@ -89,5 +89,5 @@ export function auditPage(req: Request, res: Response) {
       <td>${esc(r.event)}</td><td><span class="pill ${r.outcome === 'ok' ? 'ok' : ''}">${esc(r.outcome)}</span></td>
       <td class="meta">${esc(r.detail ?? '')}</td></tr>`).join('')}
   </table></div>`}`;
-  res.type('html').send(page('Audit', '/audit', body, pageCtx(req, scope)));
+  res.type('html').send(page('Audit', '/audit', body, await pageCtx(req, scope)));
 }

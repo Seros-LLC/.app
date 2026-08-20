@@ -133,22 +133,37 @@ function authDb() {
  * Fails CLOSED: if the credential cannot be read at all, the session is refused
  * rather than trusted.
  */
-export function sessionPasswordCurrent(s: Session): boolean {
+export async function sessionPasswordCurrent(s: Session): Promise<boolean> {
   try {
     const creds = MemberCredentials.for(authDb(), { workspaceId: s.workspaceId });
-    return creds.passwordVersion(s.memberId) === (s.pv ?? 0);
+    const pv = await creds.passwordVersion(s.memberId);
+    return pv === (s.pv ?? 0);
   } catch (err) {
     console.log(JSON.stringify({ level: 'warn', event: 'session.check_failed', error: String((err as any)?.message ?? err) }));
     return false;
   }
 }
 
-export function requireSession(req: Request, res: Response, next: NextFunction) {
+/**
+ * Wrap an async middleware so Express properly awaits it and catches errors.
+ * Express 5 already forwards a rejected promise returned by a handler, but this
+ * keeps the contract explicit for middleware mounted with app.use(), and works
+ * whatever the express major is. The return type is deliberately Promise<unknown>:
+ * a handler that ends with `return res.status(401).send(...)` resolves to the
+ * Response object, and that is not a reason to refuse to wrap it.
+ */
+export function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+export async function requireSession(req: Request, res: Response, next: NextFunction) {
   const s = currentSession(req);
   if (!s) return res.redirect(303, '/login');
   // A session issued before the current password is not a session any more: this is
   // what makes a password change end every other sign-in, including a stolen one.
-  if (!sessionPasswordCurrent(s)) {
+  if (!(await sessionPasswordCurrent(s))) {
     console.log(JSON.stringify({ level: 'warn', event: 'session.superseded' }));
     clearSession(res);
     return res.redirect(303, '/login');

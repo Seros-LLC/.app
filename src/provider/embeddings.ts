@@ -1,6 +1,12 @@
 /**
  * Embedding provider: calls Ollama's /api/embeddings endpoint.
- * Returns a float32 array (we'll encode it as base64 for storage).
+ *
+ * Returns a Float32Array (we'll encode it as base64 for storage). The declared
+ * type is Float32Array and NOT number[] on purpose: every path in embed()
+ * already builds a Float32Array, so promising number[] would force an extra
+ * Array.from() copy of the whole vector (768 boxed doubles per call, ~6x the
+ * bytes) for no gain. encodeVector() accepts either shape, and decodeVector()
+ * still hands back a plain number[] for callers that want one.
  */
 import type { openDb } from '../db/client';
 
@@ -9,7 +15,7 @@ const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? 'nomic-embed-text';
 // Default embedding dimension for nomic-embed-text is 768
 const EMBEDDING_DIM = 768;
 
-export async function embed(text: string): Promise<number[]> {
+export async function embed(text: string): Promise<Float32Array> {
   try {
     const resp = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
       method: 'POST',

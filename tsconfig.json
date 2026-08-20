@@ -28,6 +28,7 @@
     ]
   },
   "include": [
+    "api/**/*.ts",
     "src/**/*.ts",
     "tests/**/*.ts",
     "evals/**/*.ts"

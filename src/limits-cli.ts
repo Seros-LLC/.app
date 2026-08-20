@@ -7,13 +7,13 @@
  * Exits non-zero if any workspace is at or past a cap (invariant 24's alerting shape:
  * a cap that is biting is something a human must see).
  */
-import { migrateDb, openDb } from './db/client';
+import { migrateDbAsync, openDb } from './db/client';
 import { runMaintenance, draftTtlDays, maxQueuedJobs, maxPendingDrafts } from './limits';
 
-function main() {
-  migrateDb();
+async function main() {
+  await migrateDbAsync();
   const db = openDb();
-  const { expired, counts } = runMaintenance(db);
+  const { expired, counts } = await runMaintenance(db);
 
   let draftsExpired = 0;
   for (const e of expired) {
@@ -44,4 +44,7 @@ function main() {
   if (exceeded > 0) process.exitCode = 1;
 }
 
-main();
+main().catch((err) => {
+  console.error(JSON.stringify({ level: 'error', event: 'limits.failed', error: String(err?.message ?? err) }));
+  process.exitCode = 1;
+});

@@ -13,7 +13,7 @@ const SAMPLES = [
   'Nice work on the release everyone.',
 ];
 
-export function demoPage(req: Request, res: Response) {
+export async function demoPage(req: Request, res: Response) {
   const token = csrfToken(req.session!);
   const body = `<h1>Post a message</h1>
   <p class="sub">Stands in for Slack. Whatever you type goes through the same pipeline: ingest, detect, draft, queue.</p>
@@ -29,20 +29,21 @@ export function demoPage(req: Request, res: Response) {
   </form>
   <div class="card"><p class="meta">Try one of these</p>
     <ul>${SAMPLES.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
-  res.type('html').send(page('Demo', '/demo', body, pageCtx(req, WorkspaceScope.open(openDb(), req.session!.workspaceId))));
+  res.type('html').send(page('Demo', '/demo', body,
+    await pageCtx(req, await WorkspaceScope.open(openDb(), req.session!.workspaceId))));
 }
 
-export function demoPost(req: Request, res: Response) {
+export async function demoPost(req: Request, res: Response) {
   const text = String(req.body?.text ?? '').trim();
   if (!text) return res.redirect(303, '/demo');
   const db = openDb();
-  const scope = WorkspaceScope.open(db, req.session!.workspaceId);
-  const { row, created } = scope.ingestMessage({
+  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
+  const { row, created } = await scope.ingestMessage({
     channelId: String(req.body?.channel || 'C-general'),
     ts: String(Date.now() / 1000),
     authorId: String(req.body?.user || 'u-ana'),
     body: text,
   });
-  if (created) scope.enqueue('detect', { messageId: row.id });
+  if (created) await scope.enqueue('detect', { messageId: row.id });
   return res.redirect(303, '/queue?msg=' + encodeURIComponent('Message ingested. The worker will draft it shortly.'));
 }

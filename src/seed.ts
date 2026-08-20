@@ -11,7 +11,7 @@
  * replace a real credential.
  */
 import crypto from 'node:crypto';
-import { migrateDb, openDb } from './db/client';
+import { migrateDbAsync, openDb } from './db/client';
 import { WorkspaceScope } from './db/scope';
 import { MemberCredentials, hashPassword, passwordPolicyError } from './password';
 
@@ -33,9 +33,9 @@ function generatePassword(): string {
 }
 
 async function main() {
-  migrateDb();
+  await migrateDbAsync();
   const db = openDb();
-  const scope = WorkspaceScope.ensure(db, WS, 'Demo workspace');
+  const scope = await WorkspaceScope.ensure(db, WS, 'Demo workspace');
   const creds = MemberCredentials.for(db, scope);
   const supplied = process.env.SEROS_SEED_PASSWORD;
   const reset = process.env.SEROS_SEED_RESET === '1';
@@ -44,18 +44,18 @@ async function main() {
   let kept = 0;
 
   for (const p of PEOPLE) {
-    scope.addMember(p.id, p.name, p.role);
-    creds.setEmail(p.id, p.email);
+    await scope.addMember(p.id, p.name, p.role);
+    await creds.setEmail(p.id, p.email);
 
-    if (creds.get(p.id)?.passwordHash && !reset) { kept++; continue; }
+    if ((await creds.get(p.id))?.passwordHash && !reset) { kept++; continue; }
 
     const password = supplied ?? generatePassword();
     const problem = passwordPolicyError(password);
     if (problem) throw new Error(`SEROS_SEED_PASSWORD is not acceptable: ${problem}`);
 
-    creds.setPassword(p.id, await hashPassword(password));
-    scope.audit('password.set', 'ok', { member_id: p.id, method: 'seed' },
-                { actorType: 'operator', objectType: 'member', objectId: p.id });
+    await creds.setPassword(p.id, await hashPassword(password));
+    await scope.audit('password.set', 'ok', { member_id: p.id, method: 'seed' },
+                      { actorType: 'operator', objectType: 'member', objectId: p.id });
     shown.push({ member_id: p.id, email: p.email, password: supplied ? '<SEROS_SEED_PASSWORD>' : password });
   }
 

@@ -46,6 +46,19 @@ function refusal(fn: () => unknown): string {
   return assert.fail('the write was NOT refused');
 }
 
+/** The same check for a write that is now a promise: the scope methods reject. */
+async function rejection(fn: () => Promise<unknown>): Promise<string> {
+  try {
+    await fn();
+  } catch (e) {
+    const parts: string[] = [];
+    let err: unknown = e;
+    while (err instanceof Error) { parts.push(err.message); err = err.cause; }
+    return parts.join(' | ');
+  }
+  return assert.fail('the write was NOT refused');
+}
+
 function rows(workspaceId: string) {
   return db.select().from(auditEvents).where(eq(auditEvents.workspaceId, workspaceId)).all();
 }
@@ -59,9 +72,9 @@ test('audit: the table carries every field the brief mandates', () => {
   for (const f of MANDATED_FIELDS) assert.ok(present.includes(f), `audit_log is missing ${f}`);
 });
 
-test('audit: a row written by the existing four-argument writer is fully populated', () => {
-  const s = WorkspaceScope.ensure(db, 'A-fields');
-  s.audit('connection.created', 'ok', { connection_id: 'c-1', channel_count: 2 });
+test('audit: a row written by the existing four-argument writer is fully populated', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-fields');
+  await s.audit('connection.created', 'ok', { connection_id: 'c-1', channel_count: 2 });
 
   const row = rows('A-fields')[0];
   assert.ok(row, 'the writer wrote nothing');
@@ -82,8 +95,8 @@ test('audit: a row written by the existing four-argument writer is fully populat
   assert.ok(row.at > 0);
 });
 
-test('audit: an actor, a subject and a request id are recorded when the caller supplies them', () => {
-  const s = WorkspaceScope.ensure(db, 'A-actor');
+test('audit: an actor, a subject and a request id are recorded when the caller supplies them', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-actor');
   db.insert(auditEvents).values({
     workspaceId: s.workspaceId, event: 'draft.confirmed', outcome: 'ok',
     actorType: 'member', actorId: 'm-ana',
@@ -100,8 +113,8 @@ test('audit: an actor, a subject and a request id are recorded when the caller s
   assert.equal(row.requestId, 'req-abc-123');
 });
 
-test('audit: the three actor kinds are distinguishable and nothing else is accepted', () => {
-  const s = WorkspaceScope.ensure(db, 'A-kinds');
+test('audit: the three actor kinds are distinguishable and nothing else is accepted', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-kinds');
   for (const [kind, id] of [['member', 'm-1'], ['system', null], ['operator', 'op-7']] as const) {
     db.insert(auditEvents).values({
       workspaceId: s.workspaceId, event: 'operator.accessed', outcome: 'ok',
@@ -122,9 +135,9 @@ test('audit: the three actor kinds are distinguishable and nothing else is accep
   }).run()), /CHECK/);
 });
 
-test('audit: an UPDATE of an audit row is refused by the database', () => {
-  const s = WorkspaceScope.ensure(db, 'A-update');
-  s.audit('draft.confirmed', 'ok', { draft_id: 'd-1' });
+test('audit: an UPDATE of an audit row is refused by the database', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-update');
+  await s.audit('draft.confirmed', 'ok', { draft_id: 'd-1' });
   const before = rows('A-update')[0]!;
 
   // through the ORM ...
@@ -137,10 +150,10 @@ test('audit: an UPDATE of an audit row is refused by the database', () => {
   assert.deepEqual(rows('A-update')[0], before, 'the row moved despite the refusal');
 });
 
-test('audit: a DELETE of an audit row is refused by the database', () => {
-  const s = WorkspaceScope.ensure(db, 'A-delete');
-  s.audit('task.created', 'ok', { task_id: 't-1' });
-  s.audit('task.created', 'ok', { task_id: 't-2' });
+test('audit: a DELETE of an audit row is refused by the database', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-delete');
+  await s.audit('task.created', 'ok', { task_id: 't-1' });
+  await s.audit('task.created', 'ok', { task_id: 't-2' });
 
   assert.match(refusal(() => db.delete(auditEvents).where(eq(auditEvents.workspaceId, 'A-delete')).run()), /append-only/i);
   assert.match(refusal(() => db.run(sql`DELETE FROM audit_log WHERE workspace_id = ${'A-delete'}`)), /append-only/i);
@@ -149,9 +162,9 @@ test('audit: a DELETE of an audit row is refused by the database', () => {
   assert.equal(rows('A-delete').length, 2);
 });
 
-test('audit: the append-only ban holds inside a transaction', () => {
-  const s = WorkspaceScope.ensure(db, 'A-tx');
-  s.audit('session.started', 'ok', { member_id: 'm-1' });
+test('audit: the append-only ban holds inside a transaction', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-tx');
+  await s.audit('session.started', 'ok', { member_id: 'm-1' });
 
   assert.match(refusal(() => db.transaction((tx) => {
     tx.run(sql`DELETE FROM audit_log WHERE workspace_id = ${'A-tx'}`);
@@ -159,14 +172,14 @@ test('audit: the append-only ban holds inside a transaction', () => {
   assert.equal(rows('A-tx').length, 1);
 });
 
-test('audit: ids are monotonic, across workspaces and after a refused write', () => {
-  const a = WorkspaceScope.ensure(db, 'A-mono-a');
-  const b = WorkspaceScope.ensure(db, 'A-mono-b');
+test('audit: ids are monotonic, across workspaces and after a refused write', async () => {
+  const a = await WorkspaceScope.ensure(db, 'A-mono-a');
+  const b = await WorkspaceScope.ensure(db, 'A-mono-b');
   const seen: number[] = [];
   for (let i = 0; i < 5; i++) {
-    a.audit('message.ingested', 'ok', { message_id: `m-${i}` });
+    await a.audit('message.ingested', 'ok', { message_id: `m-${i}` });
     seen.push(rows('A-mono-a').at(-1)!.id);
-    b.audit('message.ingested', 'ok', { message_id: `n-${i}` });
+    await b.audit('message.ingested', 'ok', { message_id: `n-${i}` });
     seen.push(rows('A-mono-b').at(-1)!.id);
   }
   for (let i = 1; i < seen.length; i++) {
@@ -175,32 +188,32 @@ test('audit: ids are monotonic, across workspaces and after a refused write', ()
 
   // a refused delete must not free an id for reuse either
   assert.match(refusal(() => db.run(sql`DELETE FROM audit_log WHERE workspace_id = ${'A-mono-a'}`)), /append-only/i);
-  a.audit('message.ingested', 'ok', { message_id: 'm-last' });
+  await a.audit('message.ingested', 'ok', { message_id: 'm-last' });
   assert.ok(rows('A-mono-a').at(-1)!.id > seen.at(-1)!);
 });
 
-test('audit: the database refuses a detail that carries a content field', () => {
-  const s = WorkspaceScope.ensure(db, 'A-content');
+test('audit: the database refuses a detail that carries a content field', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-content');
   for (const key of ['body', 'text', 'title', 'content', 'message', 'permalink', 'summary']) {
-    assert.match(refusal(() => s.audit('draft.created', 'ok', { [key]: 'the secret quarterly numbers are 42' })),
+    assert.match(await rejection(() => s.audit('draft.created', 'ok', { [key]: 'the secret quarterly numbers are 42' })),
                  /CHECK/, `a detail carrying "${key}" was accepted`);
   }
   // ... while the field NAMES, counts and ids that belong there are accepted
-  s.audit('draft.edited', 'ok', { draft_id: 'd-1', edited_fields: 'title,outcome', edited_count: 2 });
-  s.audit('message.ingested', 'ok', { message_id: 'm-1' });
+  await s.audit('draft.edited', 'ok', { draft_id: 'd-1', edited_fields: 'title,outcome', edited_count: 2 });
+  await s.audit('message.ingested', 'ok', { message_id: 'm-1' });
   assert.equal(rows('A-content').length, 2);
 });
 
-test('audit: a full ingest-to-task flow puts no content value in the log', () => {
+test('audit: a full ingest-to-task flow puts no content value in the log', async () => {
   const SECRET = 'the acquisition price is 4.2 million';
-  const s = WorkspaceScope.ensure(db, 'A-flow');
-  s.addMember('m-ana', 'Ana', 'confirmer');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '900.1', authorId: 'u-ana', body: SECRET });
-  const draftId = s.createDraft({
+  const s = await WorkspaceScope.ensure(db, 'A-flow');
+  await s.addMember('m-ana', 'Ana', 'confirmer');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '900.1', authorId: 'u-ana', body: SECRET });
+  const draftId = await s.createDraft({
     sourceMessageId: row.id, title: SECRET, outcome: SECRET, kind: 'commitment',
     confidence: 90, suggestedOwner: 'u-ana', suggestedDueDate: null, provider: 'fake',
   });
-  const r = s.confirm(draftId, 'confirmed_with_edits', 'm-ana', { title: `${SECRET} (edited)` });
+  const r = await s.confirm(draftId, 'confirmed_with_edits', 'm-ana', { title: `${SECRET} (edited)` });
   assert.equal(r.ok, true);
 
   const all = rows('A-flow');
@@ -219,18 +232,18 @@ test('audit: a full ingest-to-task flow puts no content value in the log', () =>
   assert.ok(!edited.detail!.includes(SECRET));
 });
 
-test('audit: the rows survive workspace deletion, and cannot be deleted with it', () => {
-  const s = WorkspaceScope.ensure(db, 'A-wsdel');
-  s.addMember('m-ana', 'Ana', 'confirmer');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '901.1', authorId: 'u-ana', body: 'something said' });
-  s.createDraft({
+test('audit: the rows survive workspace deletion, and cannot be deleted with it', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-wsdel');
+  await s.addMember('m-ana', 'Ana', 'confirmer');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '901.1', authorId: 'u-ana', body: 'something said' });
+  await s.createDraft({
     sourceMessageId: row.id, title: 'ship the thing', outcome: 'shipped', kind: 'commitment',
     confidence: 80, suggestedOwner: 'u-ana', suggestedDueDate: null, provider: 'fake',
   });
   const before = rows('A-wsdel');
   assert.ok(before.length >= 2);
 
-  const result = deleteWorkspace(db, 'A-wsdel');
+  const result = await deleteWorkspace(db, 'A-wsdel');
   assert.equal(result.status, 'deleted');
 
   const after = rows('A-wsdel');
@@ -248,10 +261,10 @@ test('audit: the rows survive workspace deletion, and cannot be deleted with it'
   assert.equal(rows('A-wsdel').length, after.length);
 });
 
-test('audit: rows stay readable and workspace-scoped after all of this', () => {
-  const s = WorkspaceScope.ensure(db, 'A-read');
-  s.audit('session.started', 'ok', { member_id: 'm-1' });
-  s.audit('draft.confirm_denied', 'denied', { member_id: 'm-1', draft_id: 'd-9' });
+test('audit: rows stay readable and workspace-scoped after all of this', async () => {
+  const s = await WorkspaceScope.ensure(db, 'A-read');
+  await s.audit('session.started', 'ok', { member_id: 'm-1' });
+  await s.audit('draft.confirm_denied', 'denied', { member_id: 'm-1', draft_id: 'd-9' });
   const seen = db.select().from(auditEvents)
     .where(and(eq(auditEvents.workspaceId, 'A-read'), eq(auditEvents.outcome, 'denied'))).all();
   assert.equal(seen.length, 1);

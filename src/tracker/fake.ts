@@ -41,5 +41,10 @@ export function createTrackerWriteResult(
   trackerId?: string,
   error?: string
 ): TrackerWriteResult {
-  return { success, trackerId, error };
+  // exactOptionalPropertyTypes: an absent optional field is not the same as one
+  // present and undefined, so only set the keys we actually have.
+  const result: TrackerWriteResult = { success };
+  if (trackerId !== undefined) result.trackerId = trackerId;
+  if (error !== undefined) result.error = error;
+  return result;
 }

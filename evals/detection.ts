@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { complete, dbMeterContext, DetectionSchema } from '../src/provider/index';
-import { migrateDb, openDb } from '../src/db/client';
+import { migrateDbAsync, openDb } from '../src/db/client';
 import { WorkspaceScope } from '../src/db/scope';
 
 type Row = { text: string; label: boolean };
@@ -20,9 +20,9 @@ async function main() {
 
   // One pass over the corpus, then score it at every threshold. The model is the
   // expensive part; the threshold is free, and choosing it is the whole point.
-  migrateDb();
+  await migrateDbAsync();
   const db = openDb();
-  WorkspaceScope.ensure(db, 'eval', 'Evaluation harness');   // budgets default to unlimited
+  await WorkspaceScope.ensure(db, 'eval', 'Evaluation harness');   // budgets default to unlimited
   const meter = dbMeterContext(db, 'eval');
 
   const preds: { label: boolean; said: boolean; conf: number; text: string }[] = [];

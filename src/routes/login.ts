@@ -32,9 +32,9 @@ const DENIED = 'Sign-in failed. Check your details and try again.';
 
 type Reason = 'unknown_identifier' | 'not_active' | 'no_password' | 'bad_password' | 'locked';
 
-const ctxFor = (req: Request, scope: WorkspaceScope): PageContext => {
+const ctxFor = async (req: Request, scope: WorkspaceScope): Promise<PageContext> => {
   const s = req.session ?? currentSession(req);
-  const m = s ? scope.member(s.memberId) : undefined;
+  const m = s ? await scope.member(s.memberId) : undefined;
   return {
     member: m ? { id: m.id, name: m.name, role: m.role } : undefined,
     csrf: s ? csrfToken(s) : undefined,
@@ -80,7 +80,7 @@ export async function loginPost(req: Request, res: Response) {
   const ws = WS();
   let scope: WorkspaceScope;
   try {
-    scope = WorkspaceScope.open(db, ws);
+    scope = await WorkspaceScope.open(db, ws);
   } catch {
     return deny(res, null, null, 'unknown_identifier');       // no workspace: same answer as always
   }
@@ -92,8 +92,9 @@ export async function loginPost(req: Request, res: Response) {
 
   // email OR member id: an address wins if it resolves, otherwise it is an id.
   const email = normaliseEmail(identifier);
-  const memberId = (email ? creds.byEmail(email)?.memberId : undefined) ?? (email ? '' : identifier);
-  const member = memberId ? scope.member(memberId) : undefined;
+  const byEmailResult = email ? await creds.byEmail(email) : undefined;
+  const memberId = (byEmailResult?.memberId) ?? (email ? '' : identifier);
+  const member = memberId ? await scope.member(memberId) : undefined;
 
   if (!member || member.status !== 'active') {
     // Pay for a hash we will not use, so "no such member" costs what "wrong password" costs.
@@ -101,7 +102,7 @@ export async function loginPost(req: Request, res: Response) {
     return deny(res, scope, member?.id ?? null, member ? 'not_active' : 'unknown_identifier');
   }
 
-  const row = creds.get(member.id);
+  const row = await creds.get(member.id);
 
   if (row?.lockedUntil && row.lockedUntil > now) {
     await verifyPassword(password, null);                     // the lock is not a shortcut
@@ -117,7 +118,7 @@ export async function loginPost(req: Request, res: Response) {
   }
 
   if (!(await verifyPassword(password, row.passwordHash))) {
-    const after = creds.recordFailure(member.id, now);
+    const after = await creds.recordFailure(member.id, now);
     const locked = !!after?.lockedUntil && after.lockedUntil > now;
     return deny(res, scope, member.id, locked ? 'locked' : 'bad_password', after?.failedAttempts ?? 0);
   }
@@ -125,24 +126,27 @@ export async function loginPost(req: Request, res: Response) {
   // Correct. Upgrade the stored parameters if they have moved on; this does NOT
   // count as a password change, so other sessions are left alone.
   if (needsRehash(row.passwordHash)) {
-    try { creds.updateHash(member.id, await hashPassword(password)); } catch { /* not worth failing a sign-in */ }
+    try { await creds.updateHash(member.id, await hashPassword(password)); } catch { /* not worth failing a sign-in */ }
   }
-  creds.recordSuccess(member.id, now);
+  await creds.recordSuccess(member.id, now);
 
   // Rotation: a brand new session id and issue time, so nothing that existed before
   // this request is the session that exists after it.
   // The session id itself is deliberately NOT recorded: the audit page is readable by
   // every member, and a session identifier is not theirs to read.
-  startSession(res, { workspaceId: ws, memberId: member.id, pv: creds.passwordVersion(member.id) });
-  scope.audit('session.started', 'ok', { member_id: member.id, mode: 'password' },
-              { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
+  const pv = await creds.passwordVersion(member.id);
+  startSession(res, { workspaceId: ws, memberId: member.id, pv });
+  await scope.audit('session.started', 'ok', { member_id: member.id, mode: 'password' },
+                    { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
   return res.redirect(303, '/queue');
 }
 
 /** Identical body, identical status, for every reason. The reason goes to the audit log. */
-function deny(res: Response, scope: WorkspaceScope | null, memberId: string | null, reason: Reason, attempts = 0) {
+async function deny(res: Response, scope: WorkspaceScope | null, memberId: string | null, reason: Reason, attempts = 0) {
   if (scope) {
-    scope.audit('session.failed', 'denied',
+    // awaited: on Postgres this insert is a promise, and a denial nobody waits for
+    // is a failed sign-in that never reaches the audit log.
+    await scope.audit('session.failed', 'denied',
       memberId ? { member_id: memberId, reason, attempts } : { reason },
       memberId ? { actorType: 'member', actorId: memberId, objectType: 'member', objectId: memberId } : {});
   }
@@ -166,7 +170,7 @@ function deny(res: Response, scope: WorkspaceScope | null, memberId: string | nu
  * Mounted before requireSession/requireCsrf in server.ts, so it checks its own
  * token: signing someone out across origins is small, but it is still a write.
  */
-export function logoutPost(req: Request, res: Response) {
+export async function logoutPost(req: Request, res: Response) {
   const s = currentSession(req);
   if (s && !csrfOk(s, (req.body ?? {}).csrf)) {
     console.log(JSON.stringify({ level: 'warn', event: 'csrf.rejected', path: '/logout' }));
@@ -174,9 +178,9 @@ export function logoutPost(req: Request, res: Response) {
   }
   if (s) {
     try {
-      const scope = WorkspaceScope.open(openDb(), s.workspaceId);
-      scope.audit('session.ended', 'ok', { member_id: s.memberId },
-                  { actorType: 'member', actorId: s.memberId });
+      const scope = await WorkspaceScope.open(openDb(), s.workspaceId);
+      await scope.audit('session.ended', 'ok', { member_id: s.memberId },
+                        { actorType: 'member', actorId: s.memberId });
     } catch { /* a session for a workspace that no longer exists still gets signed out */ }
   }
   clearSession(res);
@@ -187,12 +191,12 @@ export function logoutPost(req: Request, res: Response) {
 // GET/POST /set-password  - redeem a single-use invite
 // ---------------------------------------------------------------------------
 
-export function setPasswordPage(req: Request, res: Response) {
+export async function setPasswordPage(req: Request, res: Response) {
   const token = String(req.query.token ?? req.body?.token ?? '');
   const db = openDb();
-  const scope = WorkspaceScope.ensure(db, WS());
+  const scope = await WorkspaceScope.ensure(db, WS());
   const creds = MemberCredentials.for(db, scope);
-  const ok = token.length > 0 && creds.inviteValid(token);
+  const ok = token.length > 0 && await creds.inviteValid(token);
   const err = flash(req, 'err');
 
   const body = `<h1>Choose a password</h1>
@@ -218,35 +222,36 @@ export async function setPasswordPost(req: Request, res: Response) {
   const confirm = String(req.body?.confirm ?? '');
   const db = openDb();
   const ws = WS();
-  const scope = WorkspaceScope.ensure(db, ws);
+  const scope = await WorkspaceScope.ensure(db, ws);
   const creds = MemberCredentials.for(db, scope);
 
   const problem = passwordPolicyError(password) ?? (password === confirm ? null : 'Those two passwords are not the same.');
   if (problem) {
     // The token is NOT spent on a password we refused: check it first, claim it last.
-    if (!creds.inviteValid(token)) return res.redirect(303, '/set-password');
+    if (!(await creds.inviteValid(token))) return res.redirect(303, '/set-password');
     return res.redirect(303, '/set-password?token=' + encodeURIComponent(token) + '&err=' + encodeURIComponent(problem));
   }
 
-  const claimed = creds.claimInvite(token);          // single use, atomic, time-limited
+  const claimed = await creds.claimInvite(token);          // single use, atomic, time-limited
   if (!claimed) {
-    scope.audit('password.set', 'denied', { reason: 'invite_invalid' });
+    await scope.audit('password.set', 'denied', { reason: 'invite_invalid' });
     return res.redirect(303, '/set-password');
   }
-  const member = scope.member(claimed.memberId);
+  const member = await scope.member(claimed.memberId);
   if (!member || member.status === 'removed') {
-    scope.audit('password.set', 'denied', { member_id: claimed.memberId, reason: 'not_a_member' });
+    await scope.audit('password.set', 'denied', { member_id: claimed.memberId, reason: 'not_a_member' });
     return res.redirect(303, '/login?err=' + encodeURIComponent(DENIED));
   }
 
-  creds.setPassword(member.id, await hashPassword(password));
-  scope.audit('password.set', 'ok', { member_id: member.id, method: 'invite' },
-              { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
+  await creds.setPassword(member.id, await hashPassword(password));
+  await scope.audit('password.set', 'ok', { member_id: member.id, method: 'invite' },
+                    { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
 
   // They proved the token and chose the secret: sign them in on a NEW session.
-  startSession(res, { workspaceId: ws, memberId: member.id, pv: creds.passwordVersion(member.id) });
-  scope.audit('session.started', 'ok', { member_id: member.id, mode: 'invite' },
-              { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
+  const pv = await creds.passwordVersion(member.id);
+  startSession(res, { workspaceId: ws, memberId: member.id, pv });
+  await scope.audit('session.started', 'ok', { member_id: member.id, mode: 'invite' },
+                    { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
   return res.redirect(303, '/queue?msg=' + encodeURIComponent('Password set. You are signed in.'));
 }
 
@@ -254,12 +259,12 @@ export async function setPasswordPost(req: Request, res: Response) {
 // GET/POST /password  - change your own
 // ---------------------------------------------------------------------------
 
-export function passwordPage(req: Request, res: Response) {
+export async function passwordPage(req: Request, res: Response) {
   const s = req.session!;                                  // requireSession guarantees this
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
-  const has = !!creds.get(s.memberId)?.passwordHash;
+  const has = !!(await creds.get(s.memberId))?.passwordHash;
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
 
@@ -277,22 +282,22 @@ export function passwordPage(req: Request, res: Response) {
     <input id="confirm" type="password" name="confirm" size="34" autocomplete="new-password">
     <div class="row"><button class="primary" type="submit">${has ? 'Change password' : 'Set password'}</button></div>
   </form>`;
-  res.type('html').send(page('Your password', '/password', body, ctxFor(req, scope)));
+  res.type('html').send(page('Your password', '/password', body, await ctxFor(req, scope)));
 }
 
 export async function passwordChangePost(req: Request, res: Response) {
   const s = req.session!;
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
-  const member = scope.member(s.memberId);
+  const member = await scope.member(s.memberId);
   if (!member || member.status !== 'active') {
-    scope.audit('password.changed', 'denied', { member_id: s.memberId, reason: 'not_active' });
+    await scope.audit('password.changed', 'denied', { member_id: s.memberId, reason: 'not_active' });
     clearSession(res);
     return res.redirect(303, '/login');
   }
 
-  const row = creds.get(member.id);
+  const row = await creds.get(member.id);
   const current = String(req.body?.current ?? '');
   const password = String(req.body?.password ?? '');
   const confirm = String(req.body?.confirm ?? '');
@@ -302,9 +307,9 @@ export async function passwordChangePost(req: Request, res: Response) {
   // also hold the secret, so a borrowed browser cannot lock the owner out.
   if (row?.passwordHash) {
     if (!(await verifyPassword(current, row.passwordHash))) {
-      creds.recordFailure(member.id);
-      scope.audit('password.changed', 'denied', { member_id: member.id, reason: 'bad_current' },
-                  { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
+      await creds.recordFailure(member.id);
+      await scope.audit('password.changed', 'denied', { member_id: member.id, reason: 'bad_current' },
+                        { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
       return bad('That current password is not right.');
     }
   }
@@ -315,17 +320,18 @@ export async function passwordChangePost(req: Request, res: Response) {
     return bad('That is the password you already have.');
   }
 
-  creds.setPassword(member.id, await hashPassword(password));
+  await creds.setPassword(member.id, await hashPassword(password));
   const first = !row?.passwordHash;
-  scope.audit(first ? 'password.set' : 'password.changed', 'ok',
-              { member_id: member.id, method: 'self_service' },
-              { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
+  await scope.audit(first ? 'password.set' : 'password.changed', 'ok',
+                    { member_id: member.id, method: 'self_service' },
+                    { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
 
   // password_set_at moved, so every session issued against the old password - every
   // one but this one - stops being a session at the next request it makes.
-  startSession(res, { workspaceId: s.workspaceId, memberId: member.id, pv: creds.passwordVersion(member.id) });
-  scope.audit('session.rotated', 'ok', { member_id: member.id, reason: 'password_change' },
-              { actorType: 'member', actorId: member.id });
+  const pv = await creds.passwordVersion(member.id);
+  startSession(res, { workspaceId: s.workspaceId, memberId: member.id, pv });
+  await scope.audit('session.rotated', 'ok', { member_id: member.id, reason: 'password_change' },
+                    { actorType: 'member', actorId: member.id });
   return res.redirect(303, '/password?msg=' + encodeURIComponent('Password changed. Other sessions were signed out.'));
 }
 
@@ -335,17 +341,18 @@ export async function passwordChangePost(req: Request, res: Response) {
 
 const CAN_INVITE = new Set(['owner', 'admin']);
 
-export function membersPage(req: Request, res: Response) {
+export async function membersPage(req: Request, res: Response) {
   const s = req.session!;
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
-  const me = scope.member(s.memberId);
+  const me = await scope.member(s.memberId);
   const mayInvite = !!me && me.status === 'active' && CAN_INVITE.has(me.role);
   const issuedFor = flash(req, 'member');
   const token = flash(req, 'token');            // shown once, from the POST that made it
 
-  const rows = scope.rosterWithRoles().map((m) => ({ ...m, cred: creds.status(m.id) }));
+  const rows = await Promise.all((await scope.rosterWithRoles())
+    .map(async (m) => ({ ...m, cred: await creds.status(m.id) })));
   const body = `<h1>Members</h1>
   <p class="sub">Who can sign in, and whether they have a credential yet. No hashes, no tokens.</p>
   ${token ? `<div class="card"><p class="meta">Invite for ${esc(issuedFor)} - shown once, not stored, expires in
@@ -364,34 +371,34 @@ export function membersPage(req: Request, res: Response) {
         <button type="submit">Invite</button></form></td>` : ''}
     </tr>`).join('')}
   </table></div>`;
-  res.type('html').send(page('Members', '/members', body, ctxFor(req, scope)));
+  res.type('html').send(page('Members', '/members', body, await ctxFor(req, scope)));
 }
 
-export function invitePost(req: Request, res: Response) {
+export async function invitePost(req: Request, res: Response) {
   const s = req.session!;
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
-  const me = scope.member(s.memberId);
-  const target = scope.member(String(req.body?.memberId ?? ''));
+  const me = await scope.member(s.memberId);
+  const target = await scope.member(String(req.body?.memberId ?? ''));
 
   if (!me || me.status !== 'active' || !CAN_INVITE.has(me.role)) {
-    scope.audit('invite.issued', 'denied', { member_id: s.memberId, reason: 'role' },
-                { actorType: 'member', actorId: s.memberId });
+    await scope.audit('invite.issued', 'denied', { member_id: s.memberId, reason: 'role' },
+                      { actorType: 'member', actorId: s.memberId });
     return res.status(403).type('html').send(page('Members', '/members',
       '<h1>Members</h1><div class="empty">Only an owner or an admin can issue an invite.</div>'));
   }
   if (!target || target.status === 'removed') {
-    scope.audit('invite.issued', 'denied', { reason: 'no_such_member' },
-                { actorType: 'member', actorId: s.memberId });
+    await scope.audit('invite.issued', 'denied', { reason: 'no_such_member' },
+                      { actorType: 'member', actorId: s.memberId });
     return res.redirect(303, '/members');
   }
 
   const { token, hash } = newInviteToken();
-  const expiresAt = creds.issueInvite(target.id, hash);
+  const expiresAt = await creds.issueInvite(target.id, hash);
   // The RAW token is never written down: not here, not in the log, not in the audit row.
-  scope.audit('invite.issued', 'ok', { member_id: target.id, expires_at: expiresAt },
-              { actorType: 'member', actorId: me.id, objectType: 'member', objectId: target.id });
+  await scope.audit('invite.issued', 'ok', { member_id: target.id, expires_at: expiresAt },
+                    { actorType: 'member', actorId: me.id, objectType: 'member', objectId: target.id });
   return res.redirect(303, '/members?member=' + encodeURIComponent(target.id) +
                            '&token=' + encodeURIComponent(token));
 }

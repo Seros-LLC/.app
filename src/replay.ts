@@ -10,7 +10,8 @@
  * this table (see IMPLEMENTATION-BRIEF: content-free by construction), and the
  * signature itself is not stored in the clear either.
  *
- * Everything here is synchronous (better-sqlite3) and safe to run twice.
+ * Every entry point here is async (the drizzle handle is asynchronous on
+ * Postgres) and safe to run twice.
  */
 import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 import { eq, lte, sql } from 'drizzle-orm';
@@ -57,8 +58,7 @@ function sameHash(a: string, b: string): boolean {
   return crypto.timingSafeEqual(x, y);
 }
 
-/**
- * Delete every nonce whose window has closed.
+/** Delete every nonce whose window has closed.
  *
  * Cheap (single indexed range delete on expires_at) and idempotent: running it
  * twice, or never, changes nothing but the row count. Returns rows removed.

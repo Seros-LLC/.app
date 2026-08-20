@@ -94,11 +94,11 @@ test('sqlite: openDb() still returns the synchronous better-sqlite3 handle, with
   }
 });
 
-test('sqlite: the rewritten job claim (composite key, no rowid) still claims exactly one job', () => {
+test('sqlite: the rewritten job claim (composite key, no rowid) still claims exactly one job', async () => {
   const db = openDb();
-  const ws = WorkspaceScope.ensure(db, 'DRV-claim');
-  const a: string = ws.enqueue('drvq', { n: 1 });
-  const b: string = ws.enqueue('drvq', { n: 2 });
+  const ws = await WorkspaceScope.ensure(db, 'DRV-claim');
+  const a: string = await ws.enqueue('drvq', { n: 1 });
+  const b: string = await ws.enqueue('drvq', { n: 2 });
   const first = claimNextJob(db, ['drvq']);
   assert.ok(first, 'a queued job must be claimable');
   assert.equal(first!.status, 'running');

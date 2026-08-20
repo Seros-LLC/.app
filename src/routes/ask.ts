@@ -128,7 +128,7 @@ function render(result: AskResult, token: string): string {
 export async function askPage(req: Request, res: Response) {
   const s = req.session!;
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
   const retrieved = await retrieve(scope);
   const result: AskResult = {
     question: '', retrieved, meterId: null, modelCalled: false, outcome: { kind: 'no_question' },
@@ -139,7 +139,7 @@ export async function askPage(req: Request, res: Response) {
 export async function askPost(req: Request, res: Response) {
   const s = req.session!;
   const db = openDb();
-  const scope = WorkspaceScope.open(db, s.workspaceId);
+  const scope = await WorkspaceScope.open(db, s.workspaceId);
   const token = csrfToken(s);
   let result: AskResult;
   try {

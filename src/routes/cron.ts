@@ -13,7 +13,7 @@
 import type { Request, Response } from 'express';
 import { openDb } from '../db/client';
 import { tick } from '../worker';
-import { reapStaleJobs } from '../db/system';
+import { reapStaleJobsAsync } from '../db/system';
 import { runMaintenance } from '../limits';
 
 const cronSecret = () => process.env.CRON_SECRET || '';
@@ -45,7 +45,9 @@ export async function cronDrain(req: Request, res: Response) {
 
   let done = 0;
   let failed = 0;
-  reapStaleJobs(db);                               // anything a killed invocation left behind
+  // The async form on BOTH dialects: the synchronous one is better-sqlite3-only and
+  // throws on Postgres, which is exactly where this endpoint runs.
+  await reapStaleJobsAsync(db);                    // anything a killed invocation left behind
 
   while (done < maxJobs && Date.now() - started < budgetMs) {
     let did = false;
@@ -59,7 +61,9 @@ export async function cronDrain(req: Request, res: Response) {
     done++;
   }
 
-  try { runMaintenance(db); } catch { /* maintenance is best effort */ }
+  // awaited: runMaintenance() is async, and a serverless invocation that returns
+  // before it settles is frozen mid-write.
+  try { await runMaintenance(db); } catch { /* maintenance is best effort */ }
 
   const body = { ok: true, drained: done, failed, ms: Date.now() - started };
   console.log(JSON.stringify({ level: 'info', event: 'cron.drained', ...body }));

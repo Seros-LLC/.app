@@ -1,5 +1,5 @@
 import express from 'express';
-import { migrateDb, openDb } from './db/client';
+import { migrateDbAsync, openDb } from './db/client';
 import { webhookHandler, secret } from './routes/webhook';
 import { queuePage, tasksPage, auditPage } from './routes/queue';
 import { confirmHandler } from './routes/confirm';
@@ -10,7 +10,7 @@ import {
   loginPage, loginPost, logoutPost, setPasswordPage, setPasswordPost,
   passwordPage, passwordChangePost, membersPage, invitePost,
 } from './routes/login';
-import { requireSession, requireCsrf, rateLimit, sessionSecret } from './auth';
+import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
 import { cronDrain } from './routes/cron';
 import { page } from './views';
 
@@ -49,7 +49,7 @@ export function createApp() {
   app.post('/set-password', rateLimit('setpw', 10, 60_000), setPasswordPost);
 
   // everything below this line needs a session
-  app.use(requireSession);
+  app.use(asyncHandler(requireSession));
   app.get('/queue', queuePage);
   app.get('/tasks', tasksPage);
   app.get('/audit', auditPage);
@@ -79,9 +79,16 @@ export function createApp() {
 if (require.main === module) {
   secret();          // fail fast at boot, not with a permanent 401 in production
   sessionSecret();
-  migrateDb();
-  openDb();
-  createApp().listen(PORT, () => {
-    console.log(JSON.stringify({ level: 'info', event: 'server.listening', port: PORT }));
+  // The migration is a promise on Postgres, so the listener is opened only after it
+  // has actually finished: serving requests against half-created tables is worse
+  // than starting a second later.
+  migrateDbAsync().then(() => {
+    openDb();
+    createApp().listen(PORT, () => {
+      console.log(JSON.stringify({ level: 'info', event: 'server.listening', port: PORT }));
+    });
+  }).catch((err) => {
+    console.error(JSON.stringify({ level: 'error', event: 'server.migrate_failed', error: String(err?.message ?? err) }));
+    process.exitCode = 1;
   });
 }

@@ -26,9 +26,13 @@ const server = createApp().listen(0);
 const port = (server.address() as any).port;
 const url = (p: string) => `http://127.0.0.1:${port}${p}`;
 
-WorkspaceScope.ensure(db, 'T-test');   // the webhook refuses unknown workspaces now
+// the webhook refuses unknown workspaces now, and ensure() is a promise on both
+// drivers; this file is CommonJS, so the fixture is a module-level promise that
+// every request helper awaits instead of a floating top-level statement.
+const workspaceReady = WorkspaceScope.ensure(db, 'T-test');
 
-function postEvent(text: string, opts: { secret?: string; ts?: string; team?: string } = {}) {
+async function postEvent(text: string, opts: { secret?: string; ts?: string; team?: string } = {}) {
+  await workspaceReady;
   const ts = opts.ts ?? String(Math.floor(Date.now() / 1000));
   const body = JSON.stringify({ team_id: opts.team ?? 'T-test', event: { type: 'message', channel: 'C1', ts: `${Date.now()}.${Math.floor(Math.random() * 1e6)}`, user: 'u-ana', text } });
   return fetch(url('/api/slack/events'), {
@@ -62,6 +66,7 @@ test('webhook: stale timestamp is rejected 401', async () => {
 });
 
 test('webhook: a replayed signature is spent and refused', async () => {
+  await workspaceReady;
   const ts = String(Math.floor(Date.now() / 1000));
   const body = JSON.stringify({ team_id: 'T-test', event: { type: 'message', channel: 'C1', ts: '4242.42', user: 'u-ana', text: "I'll do the thing." } });
   const headers = { 'content-type': 'application/json', 'x-slack-request-timestamp': ts,
@@ -95,40 +100,40 @@ test('webhook: missing headers rejected 401', async () => {
   assert.equal(r.status, 401);
 });
 
-test('ingest is idempotent on (workspace, channel, ts)', () => {
-  const s = WorkspaceScope.ensure(db, 'T-dedupe');
-  const a = s.ingestMessage({ channelId: 'C1', ts: '111.1', authorId: 'u1', body: 'hello' });
-  const b = s.ingestMessage({ channelId: 'C1', ts: '111.1', authorId: 'u1', body: 'hello' });
+test('ingest is idempotent on (workspace, channel, ts)', async () => {
+  const s = await WorkspaceScope.ensure(db, 'T-dedupe');
+  const a = await s.ingestMessage({ channelId: 'C1', ts: '111.1', authorId: 'u1', body: 'hello' });
+  const b = await s.ingestMessage({ channelId: 'C1', ts: '111.1', authorId: 'u1', body: 'hello' });
   assert.equal(a.created, true);
   assert.equal(b.created, false);
   assert.equal(a.row.id, b.row.id);
 });
 
 test('worker turns a commitment into a pending draft', async () => {
-  const s = WorkspaceScope.ensure(db, 'T-worker');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '222.2', authorId: 'u-ana', body: "I'll ship the billing fix by Friday." });
-  s.enqueue('detect', { messageId: row.id });
+  const s = await WorkspaceScope.ensure(db, 'T-worker');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '222.2', authorId: 'u-ana', body: "I'll ship the billing fix by Friday." });
+  await s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) { /* drain */ }
-  const pending = s.pendingDrafts();
+  const pending = await s.pendingDrafts();
   assert.equal(pending.length, 1);
   assert.ok(pending[0]!.title.length > 0);
 });
 
 test('worker discards a non-commitment', async () => {
-  const s = WorkspaceScope.ensure(db, 'T-nocommit');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '333.3', authorId: 'u-bo', body: 'Nice work on the release everyone.' });
-  s.enqueue('detect', { messageId: row.id });
+  const s = await WorkspaceScope.ensure(db, 'T-nocommit');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '333.3', authorId: 'u-bo', body: 'Nice work on the release everyone.' });
+  await s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) { /* drain */ }
-  assert.equal(s.pendingDrafts().length, 0);
+  assert.equal((await s.pendingDrafts()).length, 0);
 });
 
 test('INVARIANT: a task cannot exist without a confirmation', async () => {
-  const s = WorkspaceScope.ensure(db, 'T-invariant');
-  s.addMember('u-me', 'Me');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '444.4', authorId: 'u-ana', body: "I'll fix the login bug tomorrow." });
-  s.enqueue('detect', { messageId: row.id });
+  const s = await WorkspaceScope.ensure(db, 'T-invariant');
+  await s.addMember('u-me', 'Me');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '444.4', authorId: 'u-ana', body: "I'll fix the login bug tomorrow." });
+  await s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) { /* drain */ }
-  const draft = s.pendingDrafts()[0]!;
+  const draft = (await s.pendingDrafts())[0]!;
 
   // no confirmation yet -> no task row at all
   let all = db.select().from(tasks).where(eq(tasks.workspaceId, 'T-invariant')).all();
@@ -140,7 +145,7 @@ test('INVARIANT: a task cannot exist without a confirmation', async () => {
       writeState: 'queued', threadReplyState: 'pending', idempotencyKey: 'x', createdAt: Date.now() }).run();
   });
 
-  const r = s.confirm(draft.id, 'confirmed', 'u-me');
+  const r = await s.confirm(draft.id, 'confirmed', 'u-me');
   assert.equal(r.ok, true);
   all = db.select().from(tasks).where(eq(tasks.workspaceId, 'T-invariant')).all();
   assert.equal(all.length, 1);
@@ -148,23 +153,23 @@ test('INVARIANT: a task cannot exist without a confirmation', async () => {
 });
 
 test('confirm is idempotent for the same member, and a task is never created twice', async () => {
-  const s = WorkspaceScope.ensure(db, 'T-once');
-  s.addMember('u-me', 'Me');
-  s.addMember('u-other', 'Other');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '555.5', authorId: 'u-ana', body: "I'll review the PR by Monday." });
-  s.enqueue('detect', { messageId: row.id });
+  const s = await WorkspaceScope.ensure(db, 'T-once');
+  await s.addMember('u-me', 'Me');
+  await s.addMember('u-other', 'Other');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '555.5', authorId: 'u-ana', body: "I'll review the PR by Monday." });
+  await s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) {}
-  const draft = s.pendingDrafts()[0]!;
+  const draft = (await s.pendingDrafts())[0]!;
 
-  const first: any = s.confirm(draft.id, 'confirmed', 'u-me');
-  const again: any = s.confirm(draft.id, 'confirmed', 'u-me');
+  const first: any = await s.confirm(draft.id, 'confirmed', 'u-me');
+  const again: any = await s.confirm(draft.id, 'confirmed', 'u-me');
   assert.equal(first.ok, true);
   assert.equal(again.ok, true, 'the same person asking twice gets the same answer, not an error');
   assert.equal(again.replayed, true);
   assert.equal(again.confirmationId, first.confirmationId);
 
   // and somebody else cannot overwrite a decision that has already been made
-  const other = s.confirm(draft.id, 'rejected', 'u-other');
+  const other = await s.confirm(draft.id, 'rejected', 'u-other');
   assert.equal(other.ok, false);
   assert.equal((other as any).reason, 'already_confirmed');
 
@@ -172,15 +177,15 @@ test('confirm is idempotent for the same member, and a task is never created twi
 });
 
 test('tracker write is idempotent: draining twice creates one task', async () => {
-  const s = WorkspaceScope.ensure(db, 'T-idem');
-  s.addMember('u-me', 'Me');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '666.6', authorId: 'u-ana', body: "I'll send the invoice tomorrow." });
-  s.enqueue('detect', { messageId: row.id });
+  const s = await WorkspaceScope.ensure(db, 'T-idem');
+  await s.addMember('u-me', 'Me');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '666.6', authorId: 'u-ana', body: "I'll send the invoice tomorrow." });
+  await s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) {}
-  const draft = s.pendingDrafts()[0]!;
-  const r: any = s.confirm(draft.id, 'confirmed', 'u-me');
+  const draft = (await s.pendingDrafts())[0]!;
+  const r: any = await s.confirm(draft.id, 'confirmed', 'u-me');
   while (await tick(db)) {}
-  s.enqueue('tracker_write', { confirmationId: r.confirmationId });   // replay
+  await s.enqueue('tracker_write', { confirmationId: r.confirmationId });   // replay
   while (await tick(db)) {}
   const all = db.select().from(tasks).where(eq(tasks.workspaceId, 'T-idem')).all();
   assert.equal(all.length, 1);
@@ -188,23 +193,23 @@ test('tracker write is idempotent: draining twice creates one task', async () =>
 });
 
 test('confirmation by an unknown member is refused', async () => {
-  const s = WorkspaceScope.ensure(db, 'T-member');
-  const { row } = s.ingestMessage({ channelId: 'C1', ts: '777.7', authorId: 'u-ana', body: "I'll update the docs by Wednesday." });
-  s.enqueue('detect', { messageId: row.id });
+  const s = await WorkspaceScope.ensure(db, 'T-member');
+  const { row } = await s.ingestMessage({ channelId: 'C1', ts: '777.7', authorId: 'u-ana', body: "I'll update the docs by Wednesday." });
+  await s.enqueue('detect', { messageId: row.id });
   while (await tick(db)) {}
-  const draft = s.pendingDrafts()[0]!;
-  const r = s.confirm(draft.id, 'confirmed', 'u-ghost');
+  const draft = (await s.pendingDrafts())[0]!;
+  const r = await s.confirm(draft.id, 'confirmed', 'u-ghost');
   assert.equal(r.ok, false);
   assert.equal((r as any).reason, 'no_such_member');
 });
 
-test('tenancy: a scope cannot see another workspace, and cannot be opened for a missing one', () => {
-  const a = WorkspaceScope.ensure(db, 'T-a');
-  const b = WorkspaceScope.ensure(db, 'T-b');
-  const m = a.ingestMessage({ channelId: 'C1', ts: '888.8', authorId: 'u1', body: 'private to A' });
-  assert.ok(a.messageById(m.row.id));
-  assert.equal(b.messageById(m.row.id), undefined);
-  assert.throws(() => WorkspaceScope.open(db, 'T-does-not-exist'), UnknownWorkspace);
+test('tenancy: a scope cannot see another workspace, and cannot be opened for a missing one', async () => {
+  const a = await WorkspaceScope.ensure(db, 'T-a');
+  const b = await WorkspaceScope.ensure(db, 'T-b');
+  const m = await a.ingestMessage({ channelId: 'C1', ts: '888.8', authorId: 'u1', body: 'private to A' });
+  assert.ok(await a.messageById(m.row.id));
+  assert.equal(await b.messageById(m.row.id), undefined);
+  await assert.rejects(() => WorkspaceScope.open(db, 'T-does-not-exist'), UnknownWorkspace);
 });
 
 test('audit log records the confirmation and never stores content', () => {

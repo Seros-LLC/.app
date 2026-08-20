@@ -83,7 +83,7 @@ export async function digest(
 
   if (isEmpty(retrieved)) {
     // A day with no work in it does not need a paragraph about having no work in it.
-    scope.audit('digest.no_data', 'ok', { rows: 0 });
+    await scope.audit('digest.no_data', 'ok', { rows: 0 });
     return { ...flat, prose: null, why: 'no_data' };
   }
 
@@ -115,18 +115,18 @@ export async function digest(
       res.outcome === 'invalid_output' ? 'invalid_output'
       : res.outcome === 'budget_blocked' ? 'budget_blocked'
       : 'provider_unavailable';
-    scope.audit('digest.degraded', 'failed', { reason: why, provider_outcome: res.outcome });
+    await scope.audit('digest.degraded', 'failed', { reason: why, provider_outcome: res.outcome });
     return remember(null, why);
   }
 
   if (statesANumber(res.value.headline) || statesANumber(res.value.summary)) {
     // The numbers on this page come from the database. A second set, written by a
     // model, is not a nicer sentence: it is a contradiction waiting to be believed.
-    scope.audit('digest.prose_rejected', 'denied', { reason: 'numbers_in_prose' });
+    await scope.audit('digest.prose_rejected', 'denied', { reason: 'numbers_in_prose' });
     return remember(null, 'numbers_in_prose');
   }
 
-  scope.audit('digest.written', 'ok', {
+  await scope.audit('digest.written', 'ok', {
     waiting: retrieved.counts.waiting, confirmed_today: retrieved.counts.confirmedToday,
     expired: retrieved.counts.expired, overdue: retrieved.counts.overdue,
   });

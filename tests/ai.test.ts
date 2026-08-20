@@ -101,7 +101,7 @@ async function seedDraft(scope: WorkspaceScope, opts: { title?: string; owner?: 
   seq += 1;
   const body = opts.body ?? `I'll ${opts.title ?? 'do the thing'} soon.`;
   const { row } = await scope.ingestMessage({ channelId: 'C1', ts: `${seq}.${Math.random()}`, authorId: 'u-ana', body });
-  const id = scope.createDraft({
+  const id = await scope.createDraft({
     sourceMessageId: row.id,
     title: opts.title ?? `Draft ${seq}`,
     outcome: 'the thing is done',
@@ -148,7 +148,7 @@ function sessionFor(workspaceId: string, memberId: string) {
 // ===========================================================================
 
 test('ask: an empty workspace is answered without calling the model at all', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-empty');
+  const s = await WorkspaceScope.ensure(db, 'ai-empty');
   const before = meterRows('ai-empty').length;
   const r = await ask(db, s, 'what is overdue?');
   assert.equal(r.outcome.kind, 'no_data');
@@ -159,8 +159,8 @@ test('ask: an empty workspace is answered without calling the model at all', asy
 });
 
 test('ask: a blank question never reaches the model either', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-blank');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-blank');
+  await s.addMember('u-ana', 'Ana');
   await seedDraft(s, { title: 'Send the deck' });
   const before = meterRows('ai-blank').length;
   const r = await ask(db, s, '   ');
@@ -169,8 +169,8 @@ test('ask: a blank question never reaches the model either', async () => {
 });
 
 test('ask: a well-formed answer is returned with the rows it cited', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-answer');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-answer');
+  await s.addMember('u-ana', 'Ana');
   const draftId = await seedDraft(s, { title: 'Send the revised deck', due: '2020-01-01' });
   const r = await withModel(
     { answer: 'The deck is still waiting for a human and its due date has passed.', citedIds: [`draft:${draftId}`] },
@@ -185,8 +185,8 @@ test('ask: a well-formed answer is returned with the rows it cited', async () =>
 });
 
 test('ask: an answer citing an id outside the retrieved set is discarded whole', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-cite');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-cite');
+  await s.addMember('u-ana', 'Ana');
   await seedDraft(s, { title: 'Real work that exists' });
   const r = await withModel(
     { answer: 'You also committed to migrating the billing service.', citedIds: ['task:11111111-2222-3333-4444-555555555555'] },
@@ -199,8 +199,8 @@ test('ask: an answer citing an id outside the retrieved set is discarded whole',
 });
 
 test('ask: an id invented in the prose is caught even when citedIds is clean', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-cite2');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-cite2');
+  await s.addMember('u-ana', 'Ana');
   await seedDraft(s, { title: 'Real work that exists' });
   const r = await withModel(
     { answer: 'See draft:not-a-real-draft for the migration you promised.', citedIds: [] },
@@ -220,8 +220,8 @@ test('ask: citationsWithin is the whole rule, and it is not fooled by a prefix',
 });
 
 test('ask: a schema failure degrades to the plain view instead of throwing or half-rendering', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-schema');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-schema');
+  await s.addMember('u-ana', 'Ana');
   await seedDraft(s, { title: 'A draft the reader can still read' });
   // SEROS_PROVIDER=fake answers every non-detect purpose with a DRAFT-shaped object,
   // which is not an answer: the provider records invalid_output and returns null.
@@ -242,8 +242,8 @@ test('ask: a schema failure degrades to the plain view instead of throwing or ha
 });
 
 test('ask: every model call writes exactly one meter row, with the prompt version on it', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-meter');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-meter');
+  await s.addMember('u-ana', 'Ana');
   await seedDraft(s, { title: 'Something to ask about' });
   const before = meterRows('ai-meter').length;
   await ask(db, s, 'what is waiting?');
@@ -256,8 +256,8 @@ test('ask: every model call writes exactly one meter row, with the prompt versio
 });
 
 test('ask: the retrieved set is capped, and the counts stay true above the cap', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-cap');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-cap');
+  await s.addMember('u-ana', 'Ana');
   const total = MODEL_ROW_CAP + 5;
   for (let i = 0; i < total; i++) await seedDraft(s, { title: `Capped draft ${i}` });
   const r = await retrieve(s);
@@ -268,10 +268,10 @@ test('ask: the retrieved set is capped, and the counts stay true above the cap',
 });
 
 test('ask: workspace A never sees workspace B rows, in the facts, the ids or the page', async () => {
-  const a = WorkspaceScope.ensure(db, 'ai-ten-a');
-  const b = WorkspaceScope.ensure(db, 'ai-ten-b');
-  a.addMember('u-a', 'Ana');
-  b.addMember('u-b', 'Bo');
+  const a = await WorkspaceScope.ensure(db, 'ai-ten-a');
+  const b = await WorkspaceScope.ensure(db, 'ai-ten-b');
+  await a.addMember('u-a', 'Ana');
+  await b.addMember('u-b', 'Bo');
   await seedDraft(a, { title: 'Work belonging to A' });
   const bDraft = await seedDraft(b, { title: 'SECRET-OF-B' });
 
@@ -304,8 +304,8 @@ test('ask: the page needs a session, like every other page', async () => {
 // ===========================================================================
 
 test('explain: a short reason comes back, is stored through the scope, and audits only its length', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-explain');
-  s.addMember('u-ana', 'Ana');
+  const s = await WorkspaceScope.ensure(db, 'ai-explain');
+  await s.addMember('u-ana', 'Ana');
   const draftId = await seedDraft(s, { title: 'Send the deck' });
   const stored: Array<{ id: string; reason: string; version: string }> = [];
   const scope: ReasonScope = {
@@ -327,7 +327,7 @@ test('explain: a short reason comes back, is stored through the scope, and audit
 });
 
 test('explain: an over-long reason is dropped rather than truncated mid-clause', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-explain-long');
+  const s = await WorkspaceScope.ensure(db, 'ai-explain-long');
   const long = Array.from({ length: 30 }, () => 'wordy').join(' ');   // 30 words, under the 200-char schema cap
   const out = await withModel({ reason: long }, () => explainCommitment(db, s.workspaceId, { body: 'I will do it.' }));
   assert.equal(out.reason, null);
@@ -336,7 +336,7 @@ test('explain: an over-long reason is dropped rather than truncated mid-clause',
 });
 
 test('explain: a provider failure leaves the field absent, and is still metered', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-explain-fail');
+  const s = await WorkspaceScope.ensure(db, 'ai-explain-fail');
   const before = meterRows('ai-explain-fail').length;
   const out = await explainCommitment(db, s.workspaceId, { body: "I'll ship it Friday." });
   assert.equal(out.reason, null);
@@ -348,7 +348,7 @@ test('explain: a provider failure leaves the field absent, and is still metered'
 });
 
 test('explain: explainDraft never throws, whatever the storage does', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-explain-throw');
+  const s = await WorkspaceScope.ensure(db, 'ai-explain-throw');
   const scope: ReasonScope = {
     workspaceId: s.workspaceId,
     audit: s.audit.bind(s),
@@ -376,8 +376,8 @@ test('explain: reasonLine escapes, because it renders inside a card', () => {
 
 test('digest: the counts are computed in code and survive prose that disagrees', async () => {
   clearDigestCache();
-  const s = WorkspaceScope.ensure(db, 'ai-digest');
-  s.addMember('u-bo', 'Bo');
+  const s = await WorkspaceScope.ensure(db, 'ai-digest');
+  await s.addMember('u-bo', 'Bo');
   await seedTask(s, 'u-bo', { title: 'Confirmed thing' });
   await seedDraft(s, { title: 'Waiting thing' });
   await seedDraft(s, { title: 'Overdue thing', due: '2020-01-01' });
@@ -395,9 +395,9 @@ test('digest: the counts are computed in code and survive prose that disagrees',
 
 test('digest: prose that states its own count is refused, and the numbers still render', async () => {
   clearDigestCache();
-  const s = WorkspaceScope.ensure(db, 'ai-digest-num');
-  s.addMember('u-bo', 'Bo');
-  seedDraft(s, { title: 'Waiting thing' });
+  const s = await WorkspaceScope.ensure(db, 'ai-digest-num');
+  await s.addMember('u-bo', 'Bo');
+  await seedDraft(s, { title: 'Waiting thing' });
   const d = await withModel(
     { headline: 'Three things landed', summary: 'The team confirmed three commitments today.' },
     () => digest(db, s, { noCache: true }),
@@ -418,10 +418,10 @@ test('digest: statesANumber refuses counts but allows a date and ordinary prose'
 
 test('digest: a model failure still renders every count', async () => {
   clearDigestCache();
-  const s = WorkspaceScope.ensure(db, 'ai-digest-fail');
-  s.addMember('u-bo', 'Bo');
-  seedTask(s, 'u-bo', { title: 'Confirmed under failure' });
-  seedDraft(s, { title: 'Waiting under failure' });
+  const s = await WorkspaceScope.ensure(db, 'ai-digest-fail');
+  await s.addMember('u-bo', 'Bo');
+  await seedTask(s, 'u-bo', { title: 'Confirmed under failure' });
+  await seedDraft(s, { title: 'Waiting under failure' });
   const d = await digest(db, s, { noCache: true });          // fake provider: wrong shape
   assert.equal(d.prose, null);
   assert.equal(d.why, 'invalid_output');
@@ -437,7 +437,7 @@ test('digest: a model failure still renders every count', async () => {
 
 test('digest: an empty workspace calls no model', async () => {
   clearDigestCache();
-  const s = WorkspaceScope.ensure(db, 'ai-digest-empty');
+  const s = await WorkspaceScope.ensure(db, 'ai-digest-empty');
   const before = meterRows('ai-digest-empty').length;
   const d = await digest(db, s);
   assert.equal(d.why, 'no_data');
@@ -447,9 +447,9 @@ test('digest: an empty workspace calls no model', async () => {
 
 test('digest: refreshing the page does not buy a second model call', async () => {
   clearDigestCache();
-  const s = WorkspaceScope.ensure(db, 'ai-digest-cache');
-  s.addMember('u-bo', 'Bo');
-  seedDraft(s, { title: 'Cached thing' });
+  const s = await WorkspaceScope.ensure(db, 'ai-digest-cache');
+  await s.addMember('u-bo', 'Bo');
+  await seedDraft(s, { title: 'Cached thing' });
   const before = meterRows('ai-digest-cache').length;
   await withModel({ headline: 'Quiet day', summary: 'A commitment is waiting for a human.' }, async () => {
     const first = await digest(db, s);
@@ -463,9 +463,9 @@ test('digest: refreshing the page does not buy a second model call', async () =>
 
 test('digest: one page load is one metered call, tagged digest/v1', async () => {
   clearDigestCache();
-  const s = WorkspaceScope.ensure(db, 'ai-digest-meter');
-  s.addMember('u-bo', 'Bo');
-  seedDraft(s, { title: 'Metered thing' });
+  const s = await WorkspaceScope.ensure(db, 'ai-digest-meter');
+  await s.addMember('u-bo', 'Bo');
+  await seedDraft(s, { title: 'Metered thing' });
   const before = meterRows('ai-digest-meter').length;
   await digest(db, s, { noCache: true });
   const after = meterRows('ai-digest-meter');
@@ -479,14 +479,14 @@ test('digest: one page load is one metered call, tagged digest/v1', async () => 
 // ===========================================================================
 
 test('ai: neither page creates a task, a confirmation or a draft', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-readonly');
-  s.addMember('u-ana', 'Ana');
-  seedTask(s, 'u-ana', { title: 'Already confirmed' });
-  seedDraft(s, { title: 'Already waiting' });
+  const s = await WorkspaceScope.ensure(db, 'ai-readonly');
+  await s.addMember('u-ana', 'Ana');
+  await seedTask(s, 'u-ana', { title: 'Already confirmed' });
+  await seedDraft(s, { title: 'Already waiting' });
   const count = (t: 'tasks' | 'confirmations') => (t === 'tasks'
     ? db.select().from(tasks).where(eq(tasks.workspaceId, 'ai-readonly')).all().length
     : db.select().from(confirmations).where(eq(confirmations.workspaceId, 'ai-readonly')).all().length);
-  const drafts = s.pendingDrafts().length;
+  const drafts = (await s.pendingDrafts()).length;
   const before = { tasks: count('tasks'), confirmations: count('confirmations'), drafts };
 
   const { cookie, csrf } = sessionFor('ai-readonly', 'u-ana');
@@ -499,16 +499,16 @@ test('ai: neither page creates a task, a confirmation or a draft', async () => {
   await fetch(url('/digest'), { headers: { cookie } });
 
   assert.deepEqual(
-    { tasks: count('tasks'), confirmations: count('confirmations'), drafts: s.pendingDrafts().length },
+    { tasks: count('tasks'), confirmations: count('confirmations'), drafts: (await s.pendingDrafts()).length },
     before,
     'these are read-and-explain features',
   );
 });
 
 test('ai: the audit rows these features write carry counts and ids, never content', async () => {
-  const s = WorkspaceScope.ensure(db, 'ai-audit');
-  s.addMember('u-ana', 'Ana');
-  seedDraft(s, { title: 'CONTENT-THAT-MUST-NOT-BE-AUDITED' });
+  const s = await WorkspaceScope.ensure(db, 'ai-audit');
+  await s.addMember('u-ana', 'Ana');
+  await seedDraft(s, { title: 'CONTENT-THAT-MUST-NOT-BE-AUDITED' });
   await ask(db, s, 'what is waiting?');
   clearDigestCache();
   await digest(db, s, { noCache: true });
@@ -517,7 +517,7 @@ test('ai: the audit rows these features write carry counts and ids, never conten
   assert.ok(rows.some((r) => r.event.startsWith('digest.')));
   for (const r of rows) assert.doesNotMatch(r.detail ?? '', /CONTENT-THAT-MUST-NOT-BE-AUDITED/);
   // and the database itself refuses a content-shaped key, so this cannot regress
-  assert.throws(() => s.audit('ask.answered', 'ok', { title: 'the deck' }));
+  await assert.rejects(() => s.audit('ask.answered', 'ok', { title: 'the deck' }));
 });
 
 test('ai: the model is never reached without a meter context', async () => {
@@ -573,11 +573,11 @@ const getReasons = (workspaceId: string, draftIds: string[]): Record<string, str
   return out;
 };
 
-test('reason sidecar: one row per draft, written twice, read back once', () => {
-  const s = WorkspaceScope.ensure(db, 'ai-sidecar');
-  s.addMember('u-ana', 'Ana');
-  const d1 = seedDraft(s, { title: 'First' });
-  const d2 = seedDraft(s, { title: 'Second' });
+test('reason sidecar: one row per draft, written twice, read back once', async () => {
+  const s = await WorkspaceScope.ensure(db, 'ai-sidecar');
+  await s.addMember('u-ana', 'Ana');
+  const d1 = await seedDraft(s, { title: 'First' });
+  const d2 = await seedDraft(s, { title: 'Second' });
   putReason('ai-sidecar', d1, 'says he will send it', 'explain/v1');
   putReason('ai-sidecar', d1, 'says he will send it by Thursday', 'explain/v1');   // recompute
   const got = getReasons('ai-sidecar', [d1, d2]);
@@ -586,21 +586,21 @@ test('reason sidecar: one row per draft, written twice, read back once', () => {
   assert.equal(reasonLine(got[d2]), '', 'and its card renders exactly as it does now');
 });
 
-test('reason sidecar: workspace B cannot read workspace A reasons', () => {
-  const a = WorkspaceScope.ensure(db, 'ai-sidecar-a');
-  const b = WorkspaceScope.ensure(db, 'ai-sidecar-b');
-  a.addMember('u-a', 'Ana');
-  b.addMember('u-b', 'Bo');
-  const da = seedDraft(a, { title: 'A work' });
+test('reason sidecar: workspace B cannot read workspace A reasons', async () => {
+  const a = await WorkspaceScope.ensure(db, 'ai-sidecar-a');
+  const b = await WorkspaceScope.ensure(db, 'ai-sidecar-b');
+  await a.addMember('u-a', 'Ana');
+  await b.addMember('u-b', 'Bo');
+  const da = await seedDraft(a, { title: 'A work' });
   putReason('ai-sidecar-a', da, 'says she will do it', 'explain/v1');
   assert.equal(getReasons('ai-sidecar-b', [da])[da], undefined);
   assert.equal(getReasons('ai-sidecar-a', [da])[da], 'says she will do it');
 });
 
-test('reason sidecar: deleting a draft takes its reason with it', () => {
-  const s = WorkspaceScope.ensure(db, 'ai-sidecar-cascade');
-  s.addMember('u-ana', 'Ana');
-  const d = seedDraft(s, { title: 'Doomed' });
+test('reason sidecar: deleting a draft takes its reason with it', async () => {
+  const s = await WorkspaceScope.ensure(db, 'ai-sidecar-cascade');
+  await s.addMember('u-ana', 'Ana');
+  const d = await seedDraft(s, { title: 'Doomed' });
   putReason('ai-sidecar-cascade', d, 'says he will do it', 'explain/v1');
   assert.equal(Object.keys(getReasons('ai-sidecar-cascade', [d])).length, 1);
   // src/retention.ts deleteWorkspace deletes drafts; the sidecar must not refuse that

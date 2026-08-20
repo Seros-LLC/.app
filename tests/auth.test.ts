@@ -28,6 +28,7 @@ import { migrateDb, openDb } from '../src/db/client';
 import { WorkspaceScope } from '../src/db/scope';
 import {
   requireSession, requireCsrf, rateLimit, resetRateLimits, csrfToken, type Session,
+  asyncHandler,
 } from '../src/auth';
 import * as authModule from '../src/auth';
 import {
@@ -45,26 +46,34 @@ const HAND_PW = 'a-different-long-password';
 
 migrateDb();
 const db = openDb();
-const scope = WorkspaceScope.ensure(db, WS, 'Auth workspace');
-const creds = MemberCredentials.for(db, scope);
+// Opening the workspace and adding a member are promises now, and this file is
+// CommonJS, so the roster lives in a module-level promise that every caller
+// awaits. The credential helper only needs the workspace id, so it is still an
+// ordinary constant.
+const scopeReady = (async () => {
+  const s = await WorkspaceScope.ensure(db, WS, 'Auth workspace');
+  await s.addMember('u-boss', 'Bea Boss', 'owner');
+  await s.addMember('u-hand', 'Hal Hand', 'confirmer');
+  await s.addMember('u-view', 'Vi View', 'viewer');
+  await s.addMember('u-lock', 'Lo Lock', 'confirmer');
+  await s.addMember('u-gone', 'Gus Gone', 'confirmer');
+  db.$client.prepare("UPDATE members SET status='suspended' WHERE workspace_id=? AND id=?").run(WS, 'u-gone');
+  return s;
+})();
+const creds = MemberCredentials.for(db, { workspaceId: WS });
 
-scope.addMember('u-boss', 'Bea Boss', 'owner');
-scope.addMember('u-hand', 'Hal Hand', 'confirmer');
-scope.addMember('u-view', 'Vi View', 'viewer');
-scope.addMember('u-lock', 'Lo Lock', 'confirmer');
-scope.addMember('u-gone', 'Gus Gone', 'confirmer');
-creds.setEmail('u-boss', 'Boss@Auth.Invalid');      // stored lower-cased
-creds.setEmail('u-hand', 'hand@auth.invalid');
-db.$client.prepare("UPDATE members SET status='suspended' WHERE workspace_id=? AND id=?").run(WS, 'u-gone');
-
-// Hashing is async and this file is CommonJS, so the fixtures are the first test.
+// Hashing is async and so is every credential write, so the fixtures are the
+// first test: this file is CommonJS and cannot await at the top level.
 test('fixture: four of the five members have a password, u-hand has none yet', async () => {
-  creds.setPassword('u-boss', await hashPassword(BOSS_PW));
-  creds.setPassword('u-lock', await hashPassword(HAND_PW));
-  creds.setPassword('u-view', await hashPassword(HAND_PW));
-  creds.setPassword('u-gone', await hashPassword(HAND_PW));
-  assert.ok(creds.workspaceHasPasswords());
-  assert.equal(creds.get('u-hand')?.passwordHash ?? null, null);
+  await scopeReady;
+  await creds.setEmail('u-boss', 'Boss@Auth.Invalid');      // stored lower-cased
+  await creds.setEmail('u-hand', 'hand@auth.invalid');
+  await creds.setPassword('u-boss', await hashPassword(BOSS_PW));
+  await creds.setPassword('u-lock', await hashPassword(HAND_PW));
+  await creds.setPassword('u-view', await hashPassword(HAND_PW));
+  await creds.setPassword('u-gone', await hashPassword(HAND_PW));
+  assert.ok(await creds.workspaceHasPasswords());
+  assert.equal((await creds.get('u-hand'))?.passwordHash ?? null, null);
 });
 
 /** The wiring src/server.ts must end up with; see the handover note. */
@@ -76,7 +85,7 @@ function buildApp() {
   app.post('/logout', logoutPost);
   app.get('/set-password', setPasswordPage);
   app.post('/set-password', rateLimit('setpw', 10, 60_000), setPasswordPost);
-  app.use(requireSession);
+  app.use(asyncHandler(requireSession));
   app.get('/whoami', (req, res) => { res.json({ memberId: req.session!.memberId }); });
   app.get('/password', passwordPage);
   app.post('/password', rateLimit('password', 20, 60_000), requireCsrf, passwordChangePost);
@@ -111,7 +120,8 @@ async function signIn(identifier: string, password: string): Promise<string> {
   assert.equal(r.status, 303, `sign-in for ${identifier} was refused`);
   return cookieOf(r);
 }
-const auditEvents = (event: string) => scope.auditRows(500).filter((a) => a.event === event);
+const auditEvents = async (event: string) =>
+  (await (await scopeReady).auditRows(500)).filter((a) => a.event === event);
 
 // ---------------------------------------------------------------------------
 // storage
@@ -187,7 +197,7 @@ test('sign in with an email address and a password', async () => {
   assert.match(r.headers.get('set-cookie') ?? '', /SameSite=Strict/);
   const who = await (await get('/whoami', cookie)).json();
   assert.equal(who.memberId, 'u-boss');
-  assert.equal(creds.get('u-boss')!.lastLoginAt! > 0, true);
+  assert.equal((await creds.get('u-boss'))!.lastLoginAt! > 0, true);
 });
 
 test('sign in with a member id and a password', async () => {
@@ -210,8 +220,8 @@ test('the password-less path is GONE: no member, no workspace and no environment
   delete process.env.SEROS_ALLOW_PASSWORDLESS;
 
   // 1. a member of a provisioned workspace who has no credential
-  scope.addMember('u-nopw', 'No Credential', 'confirmer');
-  assert.equal(creds.get('u-nopw')?.passwordHash ?? null, null);
+  await (await scopeReady).addMember('u-nopw', 'No Credential', 'confirmer');
+  assert.equal((await creds.get('u-nopw'))?.passwordHash ?? null, null);
   for (const body of [{ memberId: 'u-nopw' }, { identifier: 'u-nopw', password: '' },
                       { identifier: 'u-nopw', password: 'a guess' }]) {
     resetRateLimits();
@@ -221,9 +231,9 @@ test('the password-less path is GONE: no member, no workspace and no environment
   }
 
   // 2. the case the old path existed for: a workspace where NOBODY has a credential
-  const virgin = WorkspaceScope.ensure(db, 'authws-virgin', 'Unprovisioned workspace');
-  virgin.addMember('u-first', 'First Person', 'owner');
-  assert.equal(MemberCredentials.for(db, virgin).workspaceHasPasswords(), false);
+  const virgin = await WorkspaceScope.ensure(db, 'authws-virgin', 'Unprovisioned workspace');
+  await virgin.addMember('u-first', 'First Person', 'owner');
+  assert.equal(await MemberCredentials.for(db, virgin).workspaceHasPasswords(), false);
   const was = process.env.SEROS_WORKSPACE;
   process.env.SEROS_WORKSPACE = 'authws-virgin';     // the route reads this per request
   try {
@@ -234,8 +244,8 @@ test('the password-less path is GONE: no member, no workspace and no environment
       assert.equal(r.headers.get('set-cookie'), null);
     }
   } finally { process.env.SEROS_WORKSPACE = was; }
-  assert.ok(auditEvents('session.failed').some((a) => JSON.parse(a.detail ?? '{}').reason === 'no_password'));
-  assert.equal(scope.auditRows(500).filter((a) => (a.detail ?? '').includes('bootstrap')).length, 0);
+  assert.ok((await auditEvents('session.failed')).some((a) => JSON.parse(a.detail ?? '{}').reason === 'no_password'));
+  assert.equal((await (await scopeReady).auditRows(500)).filter((a) => (a.detail ?? '').includes('bootstrap')).length, 0);
 });
 
 test('the sign-in page no longer publishes the roster to anonymous visitors', async () => {
@@ -261,7 +271,7 @@ test('an unknown identity and a wrong password are the same answer, to the byte'
   assert.equal(new Set(bodies).size, 1, 'the failures do not all say the same thing');
   assert.match(bodies[0]!, /Sign-in failed/);
   // ... and the reason an operator needs is in the audit log instead
-  const reasons = auditEvents('session.failed').map((a) => JSON.parse(a.detail ?? '{}').reason);
+  const reasons = (await auditEvents('session.failed')).map((a) => JSON.parse(a.detail ?? '{}').reason);
   for (const expected of ['unknown_identifier', 'bad_password', 'not_active', 'no_password']) {
     assert.ok(reasons.includes(expected), `audit is missing reason ${expected}`);
   }
@@ -308,15 +318,15 @@ test('N failures lock the account for a cooldown, and the right password does no
       const r = await post('/login', { identifier: 'u-lock', password: 'wrong every time' });
       assert.equal(r.status, 401);
     }
-    const row = creds.get('u-lock')!;
-    assert.equal(row.failedAttempts, 3);
-    assert.ok(row.lockedUntil! > Date.now(), 'the account should be locked');
+    const row = await creds.get('u-lock');
+    assert.equal(row!.failedAttempts, 3);
+    assert.ok(row!.lockedUntil! > Date.now(), 'the account should be locked');
 
     resetRateLimits();
     const denied = await post('/login', { identifier: 'u-lock', password: HAND_PW });   // correct!
     assert.equal(denied.status, 401);
     assert.equal(denied.headers.get('set-cookie'), null);
-    assert.ok(auditEvents('session.failed').some((a) => {
+    assert.ok((await auditEvents('session.failed')).some((a) => {
       const d = JSON.parse(a.detail ?? '{}');
       return d.member_id === 'u-lock' && d.reason === 'locked' && a.outcome === 'denied';
     }), 'the lockout is not in the audit log');
@@ -324,8 +334,8 @@ test('N failures lock the account for a cooldown, and the right password does no
     await new Promise((r) => setTimeout(r, 1100));                                       // cooldown
     const cookie = await signIn('u-lock', HAND_PW);
     assert.equal(sessionOf(cookie).memberId, 'u-lock');
-    assert.equal(creds.get('u-lock')!.failedAttempts, 0, 'a success must clear the counter');
-    assert.equal(creds.get('u-lock')!.lockedUntil, null);
+    assert.equal((await creds.get('u-lock'))!.failedAttempts, 0, 'a success must clear the counter');
+    assert.equal((await creds.get('u-lock'))!.lockedUntil, null);
   } finally {
     process.env.SEROS_LOGIN_MAX_ATTEMPTS = before;
     process.env.SEROS_LOGIN_LOCKOUT_MS = beforeMs;
@@ -375,7 +385,7 @@ test('a password change ends every other session, including the one it was stole
   resetRateLimits();
   const undo = await post('/password', { csrf: c, current: next, password: BOSS_PW, confirm: BOSS_PW }, back);
   assert.equal(undo.status, 303);
-  assert.ok(auditEvents('password.changed').some((a) => a.outcome === 'ok'));
+  assert.ok((await auditEvents('password.changed')).some((a) => a.outcome === 'ok'));
 });
 
 test('changing a password needs the current one, and CSRF is still enforced', async () => {
@@ -397,18 +407,18 @@ test('changing a password needs the current one, and CSRF is still enforced', as
     { csrf, current: 'not my password', password: 'another-fine-password', confirm: 'another-fine-password' }, cookie);
   assert.equal(wrongCurrent.status, 303);
   assert.match(wrongCurrent.headers.get('location')!, /err=/);
-  assert.ok(await verifyPassword(BOSS_PW, creds.get('u-boss')!.passwordHash), 'the password must be unchanged');
-  assert.ok(auditEvents('password.changed').some((a) => a.outcome === 'denied'));
+  assert.ok(await verifyPassword(BOSS_PW, (await creds.get('u-boss'))!.passwordHash), 'the password must be unchanged');
+  assert.ok((await auditEvents('password.changed')).some((a) => a.outcome === 'denied'));
 
   resetRateLimits();
   const mismatch = await post('/password', { csrf, current: BOSS_PW, password: 'a-good-long-password', confirm: 'different' }, cookie);
   assert.match(mismatch.headers.get('location')!, /not%20the%20same/);
-  assert.ok(await verifyPassword(BOSS_PW, creds.get('u-boss')!.passwordHash));
+  assert.ok(await verifyPassword(BOSS_PW, (await creds.get('u-boss'))!.passwordHash));
 
   resetRateLimits();
   const weak = await post('/password', { csrf, current: BOSS_PW, password: 'short', confirm: 'short' }, cookie);
   assert.match(weak.headers.get('location')!, /err=/);
-  assert.ok(await verifyPassword(BOSS_PW, creds.get('u-boss')!.passwordHash));
+  assert.ok(await verifyPassword(BOSS_PW, (await creds.get('u-boss'))!.passwordHash));
 });
 
 test('signing out clears the cookie and refuses a cross-origin POST', async () => {
@@ -433,12 +443,12 @@ test('an admin issues an invite: raw token shown once, only a hash stored, singl
   const token = new URL(issued.headers.get('location')!, 'http://x').searchParams.get('token')!;
   assert.ok(token && token.length >= 32);
 
-  const row = creds.get('u-hand')!;
-  assert.equal(row.inviteTokenHash, hashToken(token));
-  assert.notEqual(row.inviteTokenHash, token, 'the raw token must not be what is stored');
+  const row = await creds.get('u-hand');
+  assert.equal(row!.inviteTokenHash, hashToken(token));
+  assert.notEqual(row!.inviteTokenHash, token, 'the raw token must not be what is stored');
   assert.ok(!JSON.stringify(row).includes(token), 'the raw token is somewhere in the credential row');
-  assert.ok(row.inviteExpiresAt! > Date.now());
-  for (const a of scope.auditRows(500)) assert.ok(!(a.detail ?? '').includes(token), 'a token reached the audit log');
+  assert.ok(row!.inviteExpiresAt! > Date.now());
+  for (const a of await (await scopeReady).auditRows(500)) assert.ok(!(a.detail ?? '').includes(token), 'a token reached the audit log');
 
   const formPage = await (await get('/set-password?token=' + encodeURIComponent(token))).text();
   assert.ok(formPage.includes('name="token"'));
@@ -447,7 +457,7 @@ test('an admin issues an invite: raw token shown once, only a hash stored, singl
   resetRateLimits();
   const weak = await post('/set-password', { token, password: 'short', confirm: 'short' });
   assert.match(weak.headers.get('location')!, /err=/);
-  assert.equal(creds.get('u-hand')!.inviteTokenHash, hashToken(token), 'the invite was spent on a refused password');
+  assert.equal((await creds.get('u-hand'))!.inviteTokenHash, hashToken(token), 'the invite was spent on a refused password');
 
   const chosen = 'the-password-hal-chose';
   resetRateLimits();
@@ -456,16 +466,16 @@ test('an admin issues an invite: raw token shown once, only a hash stored, singl
   const cookie = cookieOf(ok);
   assert.equal(sessionOf(cookie).memberId, 'u-hand', 'redeeming an invite signs you in on a fresh session');
   assert.equal((await (await get('/whoami', cookie)).json()).memberId, 'u-hand');
-  assert.equal(creds.get('u-hand')!.inviteTokenHash, null, 'the invite must be spent');
-  assert.ok(await verifyPassword(chosen, creds.get('u-hand')!.passwordHash));
+  assert.equal((await creds.get('u-hand'))!.inviteTokenHash, null, 'the invite must be spent');
+  assert.ok(await verifyPassword(chosen, (await creds.get('u-hand'))!.passwordHash));
 
   // single use: the same link again does nothing
   resetRateLimits();
   const replay = await post('/set-password', { token, password: 'yet-another-password', confirm: 'yet-another-password' });
   assert.equal(replay.status, 303);
   assert.equal(replay.headers.get('set-cookie'), null);
-  assert.ok(await verifyPassword(chosen, creds.get('u-hand')!.passwordHash), 'a replayed invite changed the password');
-  assert.ok(auditEvents('password.set').some((a) => a.outcome === 'denied'));
+  assert.ok(await verifyPassword(chosen, (await creds.get('u-hand'))!.passwordHash), 'a replayed invite changed the password');
+  assert.ok((await auditEvents('password.set')).some((a) => a.outcome === 'denied'));
 
   // and the new credential is a sign-in
   const again = await signIn('hand@auth.invalid', chosen);
@@ -474,14 +484,14 @@ test('an admin issues an invite: raw token shown once, only a hash stored, singl
 
 test('an expired invite is not redeemable, and an unknown token is refused', async () => {
   const { token, hash } = newInviteToken();
-  creds.issueInvite('u-view', hash, Date.now() - 60_000, 1_000);     // expired a minute ago
-  assert.equal(creds.inviteValid(token), false);
-  assert.equal(creds.claimInvite(token), undefined);
+  await creds.issueInvite('u-view', hash, Date.now() - 60_000, 1_000);     // expired a minute ago
+  assert.equal(await creds.inviteValid(token), false);
+  assert.equal(await creds.claimInvite(token), undefined);
   resetRateLimits();
   const r = await post('/set-password', { token, password: 'a-perfectly-fine-password', confirm: 'a-perfectly-fine-password' });
   assert.equal(r.status, 303);
   assert.equal(r.headers.get('set-cookie'), null);
-  assert.equal(creds.claimInvite('a token nobody issued'), undefined);
+  assert.equal(await creds.claimInvite('a token nobody issued'), undefined);
 });
 
 test('only an owner or an admin may issue an invite', async () => {
@@ -489,8 +499,8 @@ test('only an owner or an admin may issue an invite', async () => {
   resetRateLimits();
   const r = await post('/members/invite', { csrf: csrfToken(sessionOf(viewer)), memberId: 'u-lock' }, viewer);
   assert.equal(r.status, 403);
-  assert.equal(creds.get('u-lock')!.inviteTokenHash, null);
-  assert.ok(auditEvents('invite.issued').some((a) => a.outcome === 'denied'));
+  assert.equal((await creds.get('u-lock'))!.inviteTokenHash, null);
+  assert.ok((await auditEvents('invite.issued')).some((a) => a.outcome === 'denied'));
 });
 
 test('the members page shows who has a credential, and never a hash or a token', async () => {
@@ -498,7 +508,7 @@ test('the members page shows who has a credential, and never a hash or a token',
   const html = await (await get('/members', boss)).text();
   assert.ok(html.includes('u-boss') && html.includes('Hal Hand'));
   assert.ok(!html.includes('scrypt$'), 'a password hash reached a page');
-  assert.ok(!html.includes(creds.get('u-boss')!.passwordHash!.slice(0, 12)));
+  assert.ok(!html.includes((await creds.get('u-boss'))!.passwordHash!.slice(0, 12)));
 });
 
 // ---------------------------------------------------------------------------
@@ -506,18 +516,18 @@ test('the members page shows who has a credential, and never a hash or a token',
 // ---------------------------------------------------------------------------
 
 test('the audit log records the four auth events, with identifiers and nothing else', async () => {
-  const started = auditEvents('session.started');
-  const failed = auditEvents('session.failed');
+  const started = await auditEvents('session.started');
+  const failed = await auditEvents('session.failed');
   assert.ok(started.length > 0 && started.every((a) => a.outcome === 'ok'));
   assert.ok(failed.length > 0 && failed.every((a) => a.outcome === 'denied'));
-  assert.ok(auditEvents('password.set').some((a) => a.outcome === 'ok'));
-  assert.ok(auditEvents('password.changed').some((a) => a.outcome === 'ok'));
+  assert.ok((await auditEvents('password.set')).some((a) => a.outcome === 'ok'));
+  assert.ok((await auditEvents('password.changed')).some((a) => a.outcome === 'ok'));
   // a member actor is always identified, which migration 0005 also insists on
-  for (const a of [...started, ...auditEvents('password.changed')].filter((x) => x.actorType === 'member')) {
+  for (const a of [...started, ...await auditEvents('password.changed')].filter((x) => x.actorType === 'member')) {
     assert.ok(a.actorId, 'a member actor without an id');
   }
   // no secret of any kind, ever
-  const everything = scope.auditRows(1000).map((a) => a.detail ?? '').join('|');
+  const everything = (await (await scopeReady).auditRows(1000)).map((a) => a.detail ?? '').join('|');
   for (const secret of [BOSS_PW, HAND_PW, 'the-password-hal-chose', 'a-brand-new-long-password']) {
     assert.ok(!everything.includes(secret), 'a password reached the audit log');
   }
@@ -525,10 +535,11 @@ test('the audit log records the four auth events, with identifiers and nothing e
   assert.ok(!/@/.test(everything), 'an address reached the audit log');
 });
 
-test('the audit CHECK from 0005 still refuses a content-shaped detail key, which is why these keys are what they are', () => {
-  assert.throws(() => scope.audit('probe', 'ok', { name: 'Bea Boss' } as any), /CHECK/i);
-  assert.throws(() => scope.audit('probe', 'ok', { email: 'boss@auth.invalid' } as any), /CHECK/i);
-  scope.audit('probe', 'ok', { member_id: 'u-boss', reason: 'bad_password', attempts: 2 });   // accepted
+test('the audit CHECK from 0005 still refuses a content-shaped detail key, which is why these keys are what they are', async () => {
+  const scope = await scopeReady;
+  await assert.rejects(() => scope.audit('probe', 'ok', { name: 'Bea Boss' } as any), /CHECK/i);
+  await assert.rejects(() => scope.audit('probe', 'ok', { email: 'boss@auth.invalid' } as any), /CHECK/i);
+  await scope.audit('probe', 'ok', { member_id: 'u-boss', reason: 'bad_password', attempts: 2 });   // accepted
 });
 
 test('no password is written to any log line during a sign-in', async () => {
@@ -554,33 +565,33 @@ test('no password is written to any log line during a sign-in', async () => {
 // ---------------------------------------------------------------------------
 
 test('a credential is reachable only through the workspace that owns it', async () => {
-  const other = WorkspaceScope.ensure(db, 'authws-other', 'Another workspace');
+  const other = await WorkspaceScope.ensure(db, 'authws-other', 'Another workspace');
   const otherCreds = MemberCredentials.for(db, other);
-  assert.equal(otherCreds.get('u-boss'), undefined, 'a credential leaked across workspaces');
-  assert.equal(otherCreds.byEmail('boss@auth.invalid'), undefined);
-  assert.equal(otherCreds.passwordVersion('u-boss'), 0);
-  assert.equal(otherCreds.workspaceHasPasswords(), false);
+  assert.equal(await otherCreds.get('u-boss'), undefined, 'a credential leaked across workspaces');
+  assert.equal(await otherCreds.byEmail('boss@auth.invalid'), undefined);
+  assert.equal(await otherCreds.passwordVersion('u-boss'), 0);
+  assert.equal(await otherCreds.workspaceHasPasswords(), false);
 });
 
-test('deleting a member deletes the credential with it', () => {
-  const scoped = WorkspaceScope.ensure(db, 'authws-cascade', 'Cascade workspace');
+test('deleting a member deletes the credential with it', async () => {
+  const scoped = await WorkspaceScope.ensure(db, 'authws-cascade', 'Cascade workspace');
   const c = MemberCredentials.for(db, scoped);
-  scoped.addMember('u-temp', 'Temp Person', 'viewer');
-  c.setEmail('u-temp', 'temp@authws.invalid');
-  assert.ok(c.get('u-temp'));
+  await scoped.addMember('u-temp', 'Temp Person', 'viewer');
+  await c.setEmail('u-temp', 'temp@authws.invalid');
+  assert.ok(await c.get('u-temp'));
   db.$client.prepare('DELETE FROM members WHERE workspace_id=? AND id=?').run('authws-cascade', 'u-temp');
-  assert.equal(c.get('u-temp'), undefined, 'a credential outlived its member');
+  assert.equal(await c.get('u-temp'), undefined, 'a credential outlived its member');
 });
 
 test('a sign-in transparently upgrades a weaker stored parameter set, without changing the password', async () => {
-  creds.setPassword('u-lock', await hashPassword(HAND_PW, { N: 1024, r: 8, p: 1 }));
-  const before = creds.get('u-lock')!;
-  assert.equal(parseHash(before.passwordHash)!.params.N, 1024);
+  await creds.setPassword('u-lock', await hashPassword(HAND_PW, { N: 1024, r: 8, p: 1 }));
+  const before = await creds.get('u-lock');
+  assert.equal(parseHash(before!.passwordHash)!.params.N, 1024);
   const cookie = await signIn('u-lock', HAND_PW);
-  const after = creds.get('u-lock')!;
-  assert.equal(parseHash(after.passwordHash)!.params.N, 4096, 'the record should have been re-hashed');
-  assert.ok(await verifyPassword(HAND_PW, after.passwordHash));
-  assert.equal(after.passwordSetAt, before.passwordSetAt,
+  const after = await creds.get('u-lock');
+  assert.equal(parseHash(after!.passwordHash)!.params.N, 4096, 'the record should have been re-hashed');
+  assert.ok(await verifyPassword(HAND_PW, after!.passwordHash));
+  assert.equal(after!.passwordSetAt, before!.passwordSetAt,
     'a parameter upgrade is not a password change: it must not sign other sessions out');
   assert.equal((await get('/whoami', cookie)).status, 200);
 });

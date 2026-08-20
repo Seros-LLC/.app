@@ -67,26 +67,27 @@ export async function webhookHandler(req: Request, res: Response) {
   // freshness window can be sent again and again.
   const sigHeader = req.header('x-slack-signature')!;
   const tsHeader = Number(req.header('x-slack-request-timestamp'));
-  if (!checkAndRecordReplay(db, sigHeader, tsHeader).fresh) {
+  const replay = await checkAndRecordReplay(db, sigHeader, tsHeader);
+  if (!replay.fresh) {
     console.log(JSON.stringify({ level: 'warn', event: 'webhook.replayed' }));
     return res.status(409).json({ ok: false, error: 'replayed_signature' });
   }
 
   let scope;
-  try { scope = WorkspaceScope.open(db, workspaceId); }
+  try { scope = await WorkspaceScope.open(db, workspaceId); }
   catch { 
     console.log(JSON.stringify({ level: 'warn', event: 'webhook.unknown_workspace', workspace: workspaceId }));
     return res.status(404).json({ ok: false, error: 'unknown_workspace' });
   }
   // A tenant at its backlog cap is refused loudly rather than quietly dropped.
-  const lim = enforceLimits(db, workspaceId);
+  const lim = await enforceLimits(db, workspaceId);
   if (!lim.ok) {
     console.log(JSON.stringify({ level: 'warn', event: 'webhook.at_limit', workspace: workspaceId, kind: lim.kind }));
     return res.status(lim.suggestedStatus).json({ ok: false, error: lim.reason, count: lim.count, limit: lim.limit });
   }
 
-  const { row, created } = scope.ingestMessage({ channelId, ts, authorId, body: text });
-  if (created) scope.enqueue('detect', { messageId: row.id });
+  const { row, created } = await scope.ingestMessage({ channelId, ts, authorId, body: text });
+  if (created) await scope.enqueue('detect', { messageId: row.id });
   console.log(JSON.stringify({ level: 'info', event: 'webhook.accepted', workspace: workspaceId, message_id: row.id, deduped: !created }));
   return res.json({ ok: true, messageId: row.id, deduped: !created });
 }
