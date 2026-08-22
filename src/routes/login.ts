@@ -62,7 +62,11 @@ export function loginPage(req: Request, res: Response) {
     <label for="password">Password</label>
     <input id="password" type="password" name="password" size="34" autocomplete="current-password">
     <div class="row"><button class="primary" type="submit">Sign in</button></div>
-  </form>`;
+  </form>
+  <div class="oauth-buttons">
+    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
+    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+  </div>`;
   res.type('html').send(page('Sign in', '/login', body));
 }
 
