@@ -17,14 +17,14 @@
  * `(await q.limit(1))[0]` instead of `.get()`, and a row count is read through
  * affectedRows(), which knows about both `changes` and `rowCount`.
  */
-import { and, eq, desc, inArray } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { randomUUID, createHash } from 'node:crypto';
 import type { openDb } from './client';
 import { affectedRows } from './client';
 import { withTx } from './tx';
 import {
   workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
-  auditEvents, actionMeter, jobs, draftReasons,
+  auditEvents, actionMeter, jobs,
 } from './schema';
 import { normaliseEmail } from '../password';
 
@@ -306,33 +306,6 @@ export class WorkspaceScope {
       .where(and(eq(members.workspaceId, this.workspaceId), eq(memberCredentials.email, norm)))
       .innerJoin(memberCredentials, and(eq(memberCredentials.workspaceId, this.workspaceId), eq(memberCredentials.memberId, members.id)))
       .limit(1))[0];
-  }
-
-  async setDraftReason(draftId: string, reason: string, promptVersion: string): Promise<void> {
-    await this.db.insert(draftReasons).values({
-      workspaceId: this.workspaceId,
-      draftId,
-      reason,
-      promptVersion: promptVersion,
-      createdAt: Date.now()
-    }).onConflictDoUpdate({
-      target: [draftReasons.workspaceId, draftReasons.draftId],
-      set: { reason, promptVersion: promptVersion, createdAt: Date.now() }
-    });
-  }
-
-  async draftReasons(draftIds: string[]): Promise<Record<string, string>> {
-    if (draftIds.length === 0) return {};
-    const rows = await this.db.select({ draftId: draftReasons.draftId, reason: draftReasons.reason })
-      .from(draftReasons)
-      .where(and(
-        eq(draftReasons.workspaceId, this.workspaceId),
-        inArray(draftReasons.draftId, draftIds)
-      ));
-    return rows.reduce((acc, row) => ({
-      ...acc,
-      [row.draftId]: row.reason
-    }), {});
   }
 
 }

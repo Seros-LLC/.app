@@ -33,7 +33,7 @@ const DENIED = 'Sign-in failed. Check your details and try again.';
 type Reason = 'unknown_identifier' | 'not_active' | 'no_password' | 'bad_password' | 'locked';
 
 const ctxFor = async (req: Request, scope: WorkspaceScope): Promise<PageContext> => {
-  const s = req.session ?? currentSession(req);
+  const s = req.serosSession ?? currentSession(req);
   const m = s ? await scope.member(s.memberId) : undefined;
   return {
     member: m ? { id: m.id, name: m.name, role: m.role } : undefined,
@@ -252,7 +252,7 @@ export async function setPasswordPost(req: Request, res: Response) {
 // ---------------------------------------------------------------------------
 
 export async function passwordPage(req: Request, res: Response) {
-  const s = req.session!;                                  // requireSession guarantees this
+  const s = req.serosSession!;                                  // requireSession guarantees this
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
@@ -274,7 +274,7 @@ export async function passwordPage(req: Request, res: Response) {
 }
 
 export async function passwordChangePost(req: Request, res: Response) {
-  const s = req.session!;
+  const s = req.serosSession!;
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
@@ -330,7 +330,7 @@ export async function passwordChangePost(req: Request, res: Response) {
 const CAN_INVITE = new Set(['owner', 'admin']);
 
 export async function membersPage(req: Request, res: Response) {
-  const s = req.session!;
+  const s = req.serosSession!;
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);
@@ -355,7 +355,7 @@ export async function membersPage(req: Request, res: Response) {
 }
 
 export async function invitePost(req: Request, res: Response) {
-  const s = req.session!;
+  const s = req.serosSession!;
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const creds = MemberCredentials.for(db, scope);

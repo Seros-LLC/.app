@@ -15,6 +15,7 @@
  */
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
+import type * as expressSession from 'express-session';
 import { openDb } from './db/client';
 import { MemberCredentials } from './password';
 
@@ -114,7 +115,12 @@ export function csrfOk(s: Session, given: unknown): boolean {
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express { interface Request { session?: Session } }
+  namespace Express {
+    // The app's own signed-cookie session. Kept under a DIFFERENT name from
+    // express-session's req.session (which passport needs) to avoid clashing
+    // declarations: this one is `serosSession`.
+    interface Request { serosSession?: Session }
+  }
 }
 
 /**
@@ -168,13 +174,13 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
     clearSession(res);
     return res.redirect(303, '/login');
   }
-  req.session = s;
+  req.serosSession = s;
   next();
 }
 
 /** Every state-changing POST must carry a matching token and a same-origin referer. */
 export function requireCsrf(req: Request, res: Response, next: NextFunction) {
-  const s = req.session;
+  const s = req.serosSession;
   if (!s) return res.status(401).send('no session');
   if (!csrfOk(s, (req.body ?? {}).csrf)) {
     console.log(JSON.stringify({ level: 'warn', event: 'csrf.rejected', path: req.path }));
@@ -212,4 +218,65 @@ export function rateLimit(name: string, max: number, windowMs: number) {
     b.n++;
     next();
   };
+}
+
+// ---------------------------------------------------------------------------
+// helper
+// ---------------------------------------------------------------------------
+function int(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) return fallback;
+  return Math.floor(n);
+}
+export function resetTokenExpiryMs(): number {
+  return int('SEROS_RESET_TOKEN_EXPIRY_MS', 60 * 60 * 1000, 60_000, 30 * 24 * 60 * 60 * 1000); // default 1 hour
+}
+
+/**
+ * Secret used to sign reset tokens. Must be at least 16 characters.
+ */
+export function resetSecret() {
+  const s = process.env.SEROS_RESET_SECRET;
+  if (!s || s.length < 16) throw new Error('SEROS_RESET_SECRET is unset or too short (>=16 chars required)');
+  return s;
+}
+
+/**
+ * Generate a reset token for the given email.
+ * The token is a base64url-encoded string of:
+ *   iv:16 bytes | hmac:32 bytes | payload: JSON string
+ * where hmac is HMAC-SHA256(iv + payload, resetSecret()).
+ * payload: { email: string, exp: number } (expiry in milliseconds since epoch).
+ */
+export function resetToken(email: string): string {
+  const payload = { email, exp: Date.now() + resetTokenExpiryMs() };
+  const payloadBuf = Buffer.from(JSON.stringify(payload));
+  const iv = crypto.randomBytes(16);
+  const hmac = crypto.createHmac('sha256', resetSecret()).update(Buffer.concat([iv, payloadBuf])).digest();
+  const tokenBuf = Buffer.concat([iv, hmac, payloadBuf]);
+  return tokenBuf.toString('base64url');
+}
+
+/**
+ * Verify a reset token and return the email if valid and not expired.
+ * Returns null if the token is invalid, expired, or malformed.
+ */
+export function verifyResetToken(token: string): string | null {
+  try {
+    const buf = Buffer.from(token, 'base64url');
+    if (buf.length < 16 + 32) return null; // iv + hmac at minimum
+    const iv = buf.slice(0, 16);
+    const hmac = buf.slice(16, 16 + 32);
+    const payloadBuf = buf.slice(16 + 32);
+    const expected = crypto.createHmac('sha256', resetSecret()).update(Buffer.concat([iv, payloadBuf])).digest();
+    if (!crypto.timingSafeEqual(hmac, expected)) return null;
+    const payload = JSON.parse(payloadBuf.toString('utf8'));
+    if (typeof payload.email !== 'string' || typeof payload.exp !== 'number') return null;
+    if (Date.now() > payload.exp) return null;
+    return payload.email;
+  } catch {
+    return null;
+  }
 }

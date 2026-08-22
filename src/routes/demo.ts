@@ -14,7 +14,7 @@ const SAMPLES = [
 ];
 
 export async function demoPage(req: Request, res: Response) {
-  const token = csrfToken(req.session!);
+  const token = csrfToken(req.serosSession!);
   const body = `<h1>Post a message</h1>
   <p class="sub">Stands in for Slack. Whatever you type goes through the same pipeline: ingest, detect, draft, queue.</p>
   <form class="card" method="post" action="/demo">
@@ -30,14 +30,14 @@ export async function demoPage(req: Request, res: Response) {
   <div class="card"><p class="meta">Try one of these</p>
     <ul>${SAMPLES.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
   res.type('html').send(page('Demo', '/demo', body,
-    await pageCtx(req, await WorkspaceScope.open(openDb(), req.session!.workspaceId))));
+    await pageCtx(req, await WorkspaceScope.open(openDb(), req.serosSession!.workspaceId))));
 }
 
 export async function demoPost(req: Request, res: Response) {
   const text = String(req.body?.text ?? '').trim();
   if (!text) return res.redirect(303, '/demo');
   const db = openDb();
-  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
+  const scope = await WorkspaceScope.open(db, req.serosSession!.workspaceId);
   const { row, created } = await scope.ingestMessage({
     channelId: String(req.body?.channel || 'C-general'),
     ts: String(Date.now() / 1000),

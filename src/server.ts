@@ -15,6 +15,7 @@ import { cronDrain } from './routes/cron';
 import { page } from './views';
 import { configurePassport, oauthCallback, oauthError } from './routes/oauth';
 import passport from 'passport';
+import session from 'express-session';
 import { WorkspaceScope } from './db/scope';
 
 
@@ -46,6 +47,14 @@ export function createApp() {
     }
   });
   app.use(passport.initialize());
+  // Passport's session() needs a real req.session to deserialize into; the app's
+  // own signed-cookie session (src/auth.ts) is separate and lives below OAuth.
+  app.use(session({
+    secret: process.env.SEROS_SESSION_SECRET || 'seros-passport-bridge-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'strict', secure: 'auto' },
+  }));
   app.use(passport.session());
 
   app.set('trust proxy', 1);

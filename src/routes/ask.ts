@@ -126,7 +126,7 @@ function render(result: AskResult, token: string): string {
 }
 
 export async function askPage(req: Request, res: Response) {
-  const s = req.session!;
+  const s = req.serosSession!;
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const retrieved = await retrieve(scope);
@@ -137,7 +137,7 @@ export async function askPage(req: Request, res: Response) {
 }
 
 export async function askPost(req: Request, res: Response) {
-  const s = req.session!;
+  const s = req.serosSession!;
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const token = csrfToken(s);

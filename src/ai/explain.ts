@@ -26,12 +26,12 @@ type Db = ReturnType<typeof openDb>;
  * src/db/scope.ts belongs to another change; until they land the reason is
  * computed and discarded rather than half-stored. The signatures wanted are:
  *
- *   setDraftReason(draftId: string, reason: string, promptVersion: string): void
- *   draftReasons(draftIds: string[]): Record<string, string>
+ *   setDraftReason(draftId: string, reason: string, promptVersion: string): Promise<void>
+ *   draftReasons(draftIds: string[]): Promise<Record<string, string>>
  */
 export type ReasonScope = Pick<WorkspaceScope, 'workspaceId' | 'audit'> & {
-  setDraftReason?(draftId: string, reason: string, promptVersion: string): void;
-  draftReasons?(draftIds: string[]): Record<string, string>;
+  setDraftReason?(draftId: string, reason: string, promptVersion: string): Promise<void>;
+  draftReasons?(draftIds: string[]): Promise<Record<string, string>>;
 };
 
 export type ExplainWhy = 'provider_unavailable' | 'invalid_output' | 'budget_blocked' | 'too_long' | 'empty';
@@ -131,9 +131,9 @@ export async function explainDraft(
 }
 
 /** Reasons for a page of drafts, or an empty map when the scope cannot serve them. */
-export function reasonsFor(scope: ReasonScope, draftIds: string[]): Record<string, string> {
+export async function reasonsFor(scope: ReasonScope, draftIds: string[]): Promise<Record<string, string>> {
   if (typeof scope.draftReasons !== 'function' || draftIds.length === 0) return {};
-  try { return scope.draftReasons(draftIds); } catch { return {}; }
+  try { return await scope.draftReasons(draftIds); } catch { return {}; }
 }
 
 /**

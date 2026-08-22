@@ -19,7 +19,7 @@ const Body = z.object({
 });
 
 export async function confirmHandler(req: Request, res: Response) {
-  const s = req.session!;                    // requireSession + requireCsrf ran already
+  const s = req.serosSession!;                    // requireSession + requireCsrf ran already
   const parsed = Body.safeParse(req.body ?? {});
   if (!parsed.success) {
     return res.status(400).send('that form did not make sense: ' + parsed.error.issues.map((i) => i.path.join('.')).join(', '));

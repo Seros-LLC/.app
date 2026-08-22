@@ -9,7 +9,7 @@ import { reasonLine, reasonsFor } from '../ai/explain';
 
 /** Who is signed in, plus anything the layout needs. Every page gets one. */
 export async function pageCtx(req: Request, scope: WorkspaceScope, flash?: string): Promise<PageContext> {
-  const s = req.session;
+  const s = req.serosSession;
   const m = s ? await scope.member(s.memberId) : null;
   return {
     member: m ? { id: m.id, name: m.name, role: m.role } : undefined,
@@ -19,14 +19,14 @@ export async function pageCtx(req: Request, scope: WorkspaceScope, flash?: strin
 }
 
 export async function queuePage(req: Request, res: Response) {
-  const s = req.session!;                       // requireSession guarantees this
+  const s = req.serosSession!;                       // requireSession guarantees this
   const db = openDb();
   const scope = await WorkspaceScope.open(db, s.workspaceId);
   const me = await scope.member(s.memberId);
   const canConfirm = !!me && me.status === 'active' && me.role !== 'viewer';
   const token = csrfToken(s);
   const rows = await scope.pendingDrafts();
-  const reasons = reasonsFor(scope, rows.map((d) => d.id));
+  const reasons = await reasonsFor(scope, rows.map((d) => d.id));
   const flash = typeof req.query.msg === 'string' ? req.query.msg.slice(0, 200) : '';
 
   const body = `
@@ -63,7 +63,7 @@ export async function queuePage(req: Request, res: Response) {
 
 export async function tasksPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
+  const scope = await WorkspaceScope.open(db, req.serosSession!.workspaceId);
   const rows = await scope.taskRows();
 
   const body = `<h1>Tasks</h1>
@@ -79,7 +79,7 @@ export async function tasksPage(req: Request, res: Response) {
 
 export async function auditPage(req: Request, res: Response) {
   const db = openDb();
-  const scope = await WorkspaceScope.open(db, req.session!.workspaceId);
+  const scope = await WorkspaceScope.open(db, req.serosSession!.workspaceId);
   const rows = await scope.auditRows();
   const body = `<h1>Audit log</h1>
   <p class="sub">Append-only. Identifiers only — no message content ever reaches this table.</p>
