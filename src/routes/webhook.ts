@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { checkAndRecordReplay } from '../replay';
+import { workspaceIdForSlackTeam } from '../db/system';
 import { enforceLimits } from '../limits';
 
 /** No default. A signing secret that ships in the source is not a signing secret. */
@@ -50,7 +51,7 @@ export async function webhookHandler(req: Request, res: Response) {
   if (b.type === 'url_verification') return res.json({ challenge: b.challenge });
 
   const ev = b.event ?? b;
-  const workspaceId = b.team_id || b.workspace_id || 'demo';
+  const teamId: string = b.team_id || b.workspace_id || '';
   const channelId = ev.channel || 'unknown';
   if (typeof ev.ts !== 'string' || !ev.ts) return res.status(400).json({ ok: false, error: 'missing_event_ts' });
   const ts = ev.ts;
@@ -73,11 +74,29 @@ export async function webhookHandler(req: Request, res: Response) {
     return res.status(409).json({ ok: false, error: 'replayed_signature' });
   }
 
+  // The tenant is resolved from the stored connection, never from the payload.
+  // A team id that no workspace has connected - or one that was disconnected -
+  // has no tenant here, so a signed event cannot conjure or reach a workspace.
+  const workspaceId = await workspaceIdForSlackTeam(db, teamId);
+  if (!workspaceId) {
+    console.log(JSON.stringify({ level: 'warn', event: 'webhook.no_connection' }));
+    return res.status(404).json({ ok: false, error: 'unknown_workspace' });
+  }
+
   let scope;
   try { scope = await WorkspaceScope.open(db, workspaceId); }
-  catch { 
+  catch {
     console.log(JSON.stringify({ level: 'warn', event: 'webhook.unknown_workspace', workspace: workspaceId }));
     return res.status(404).json({ ok: false, error: 'unknown_workspace' });
+  }
+
+  // "We only read these." A message from a channel the admin has not ticked is
+  // dropped before it is stored, not filtered later: the promise on the channel
+  // picker is that nothing else is read, and a row in source_messages would
+  // already have broken it.
+  if (!(await scope.isChannelSelected(channelId))) {
+    console.log(JSON.stringify({ level: 'info', event: 'webhook.channel_not_selected', workspace: workspaceId }));
+    return res.json({ ok: true, ignored: 'channel_not_selected' });
   }
   // A tenant at its backlog cap is refused loudly rather than quietly dropped.
   const lim = await enforceLimits(db, workspaceId);

@@ -76,6 +76,22 @@ npm start
 | `LINEAR_API_KEY` | Linear personal API key, required when `SEROS_TRACKER=linear` | — |
 | `LINEAR_TEAM_ID` | Linear team the issues are created in | — |
 | `SEROS_TRACKER_TIMEOUT_MS` | Tracker HTTP timeout | `15000` |
+| `SEROS_SLACK` | Slack client: `http` (real) or `fake` | `fake` |
+| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | Slack app credentials for the install flow | — |
+| `SEROS_ENCRYPTION_KEY` | 32 bytes (base64 or hex) sealing stored Slack tokens | **required to connect Slack** |
+| `SEROS_PUBLIC_URL` | Public base URL, for the OAuth redirect | request host |
+
+### Connecting Slack, and what "we only read these" means
+
+`/connect` installs the Slack app (owner or admin only) and lists the scopes
+verbatim before the redirect. `/channels` is the picker. A channel that is not
+ticked is not read: the webhook drops the event **before** `source_messages`,
+so an unticked channel leaves no row to delete later. Disconnecting destroys the
+stored token and the team no longer resolves to a tenant, so ingestion stops.
+
+The tenant is resolved from the stored connection (`source_connections.team_id`),
+never from the event payload. A signed event for a team nobody has connected has
+nowhere to go and is refused.
 
 ### The tracker write
 

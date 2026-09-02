@@ -25,6 +25,7 @@ import { withTx } from './tx';
 import {
   workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
   auditEvents, actionMeter, jobs, draftReasons, taskWrites, oauthProviders,
+  sourceConnections, sourceChannels,
 } from './schema';
 import { normaliseEmail } from '../password';
 
@@ -367,6 +368,83 @@ export class WorkspaceScope {
       .where(and(eq(members.workspaceId, this.workspaceId), eq(memberCredentials.email, norm)))
       .innerJoin(memberCredentials, and(eq(memberCredentials.workspaceId, this.workspaceId), eq(memberCredentials.memberId, members.id)))
       .limit(1))[0];
+  }
+
+  // ---------------------------------------------------------------------
+  // The Slack connection, and the channels the admin agreed we may read.
+  // ---------------------------------------------------------------------
+
+  /** Stores or replaces the connection. The token arrives already sealed. */
+  async saveConnection(c: { teamId: string; teamName: string | null; botUserId: string | null;
+                            tokenEnc: string; scopes: string; installedBy: string }): Promise<void> {
+    const row = {
+      workspaceId: this.workspaceId, provider: 'slack' as const, teamId: c.teamId, teamName: c.teamName,
+      botUserId: c.botUserId, tokenEnc: c.tokenEnc, scopes: c.scopes, installedBy: c.installedBy,
+      installedAt: Date.now(), revokedAt: null,
+    };
+    await this.db.insert(sourceConnections).values(row).onConflictDoUpdate({
+      target: [sourceConnections.workspaceId, sourceConnections.provider],
+      set: { teamId: row.teamId, teamName: row.teamName, botUserId: row.botUserId, tokenEnc: row.tokenEnc,
+             scopes: row.scopes, installedBy: row.installedBy, installedAt: row.installedAt, revokedAt: null },
+    });
+  }
+
+  /** The live connection, or undefined when absent or revoked. */
+  async connection() {
+    const row = (await this.db.select().from(sourceConnections).where(and(
+      eq(sourceConnections.workspaceId, this.workspaceId),
+      eq(sourceConnections.provider, 'slack'))).limit(1))[0];
+    return row && !row.revokedAt ? row : undefined;
+  }
+
+  /** Disconnect: the token is destroyed, not just flagged. */
+  async revokeConnection(): Promise<void> {
+    await this.db.update(sourceConnections)
+      .set({ revokedAt: Date.now(), tokenEnc: '' })
+      .where(and(eq(sourceConnections.workspaceId, this.workspaceId), eq(sourceConnections.provider, 'slack')));
+    await this.db.update(sourceChannels).set({ selected: 0, selectedAt: null })
+      .where(eq(sourceChannels.workspaceId, this.workspaceId));
+  }
+
+  /** Records the channels Slack reported, preserving the admin's selection. */
+  async recordChannels(list: Array<{ id: string; name: string; isPrivate: boolean }>): Promise<void> {
+    const now = Date.now();
+    for (const c of list) {
+      await this.db.insert(sourceChannels).values({
+        workspaceId: this.workspaceId, channelId: c.id, name: c.name,
+        isPrivate: c.isPrivate ? 1 : 0, selected: 0, seenAt: now,
+      }).onConflictDoUpdate({
+        target: [sourceChannels.workspaceId, sourceChannels.channelId],
+        set: { name: c.name, isPrivate: c.isPrivate ? 1 : 0, seenAt: now },
+      });
+    }
+  }
+
+  async channels() {
+    return await this.db.select().from(sourceChannels)
+      .where(eq(sourceChannels.workspaceId, this.workspaceId)).orderBy(sourceChannels.name);
+  }
+
+  async selectedChannels() {
+    return await this.db.select().from(sourceChannels).where(and(
+      eq(sourceChannels.workspaceId, this.workspaceId), eq(sourceChannels.selected, 1)));
+  }
+
+  /** True when this channel is one the admin ticked. The webhook asks this. */
+  async isChannelSelected(channelId: string): Promise<boolean> {
+    const row = (await this.db.select({ selected: sourceChannels.selected }).from(sourceChannels).where(and(
+      eq(sourceChannels.workspaceId, this.workspaceId), eq(sourceChannels.channelId, channelId))).limit(1))[0];
+    return Number(row?.selected ?? 0) === 1;
+  }
+
+  /** Replaces the selection wholesale: the list is the statement of consent. */
+  async setSelectedChannels(ids: string[]): Promise<void> {
+    const now = Date.now();
+    await this.db.update(sourceChannels).set({ selected: 0, selectedAt: null })
+      .where(eq(sourceChannels.workspaceId, this.workspaceId));
+    if (!ids.length) return;
+    await this.db.update(sourceChannels).set({ selected: 1, selectedAt: now })
+      .where(and(eq(sourceChannels.workspaceId, this.workspaceId), inArray(sourceChannels.channelId, ids)));
   }
 
   // ---------------------------------------------------------------------

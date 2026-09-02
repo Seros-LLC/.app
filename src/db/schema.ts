@@ -126,6 +126,38 @@ export const tasks = sqliteTable('tasks', {
   uniqueIndex('uniq_confirm_task').on(t.workspaceId,t.confirmationId)
 ]);
 
+// The Slack connection and the channels the admin chose (0011_source_connections).
+// Tenant-owned: reachable only through WorkspaceScope, like every other table
+// here. The bot token is sealed by src/crypto.ts before it arrives.
+export const sourceConnections = sqliteTable('source_connections', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  provider: text('provider', { enum:['slack'] }).notNull().default('slack'),
+  teamId: text('team_id').notNull(),
+  teamName: text('team_name'),
+  botUserId: text('bot_user_id'),
+  tokenEnc: text('token_enc').notNull(),
+  scopes: text('scopes').notNull().default(''),
+  installedBy: text('installed_by'),
+  installedAt: integer('installed_at').notNull(),
+  revokedAt: integer('revoked_at'),
+}, (t)=>[
+  primaryKey({columns:[t.workspaceId,t.provider]}),
+  uniqueIndex('source_connections_team').on(t.provider,t.teamId),
+]);
+
+// "We only read these." A channel is read if and only if selected=1 here.
+export const sourceChannels = sqliteTable('source_channels', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  channelId: text('channel_id').notNull(),
+  name: text('name').notNull().default(''),
+  isPrivate: integer('is_private').notNull().default(0),
+  selected: integer('selected').notNull().default(0),
+  selectedAt: integer('selected_at'),
+  seenAt: integer('seen_at').notNull(),
+}, (t)=>[
+  primaryKey({columns:[t.workspaceId,t.channelId]}),
+]);
+
 // The tracker write lease and its result (migration 0010_task_writes.sql).
 // A sidecar rather than columns on `tasks` because `tasks.write_state` carries a
 // CHECK constraint from 0001 and SQLite cannot alter one in place. The row is

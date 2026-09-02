@@ -2,7 +2,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from './client';
 import { dialect } from './client';
-import { jobs, workspaces } from './schema';
+import { jobs, workspaces, sourceConnections } from './schema';
 
 export type JobRow = typeof jobs.$inferSelect;
 
@@ -156,4 +156,25 @@ function leaseDefault() { return Number(process.env.SEROS_JOB_LEASE_MS || 120_00
 function reportReaped(count: number): number {
   if (count) console.log(JSON.stringify({ level: 'warn', event: 'jobs.reaped', count }));
   return count;
+}
+
+/**
+ * The tenant behind a Slack team id.
+ *
+ * This is the second cross-tenant read, and it belongs here for the same reason
+ * the queue poller does: an inbound Slack event arrives with a team id and no
+ * session, so something has to map that identifier to a workspace before a
+ * WorkspaceScope can exist. It reads identifiers only - no channel, no author,
+ * no message text - and it returns nothing for a revoked connection, so
+ * disconnecting actually stops ingestion.
+ */
+export async function workspaceIdForSlackTeam(db: Db, teamId: string): Promise<string | null> {
+  if (!teamId) return null;
+  const rows = await db.select({ workspaceId: sourceConnections.workspaceId, revokedAt: sourceConnections.revokedAt })
+    .from(sourceConnections)
+    .where(and(eq(sourceConnections.provider, 'slack'), eq(sourceConnections.teamId, teamId)))
+    .limit(1);
+  const row = (rows as any[])[0];
+  if (!row || row.revokedAt) return null;
+  return row.workspaceId as string;
 }

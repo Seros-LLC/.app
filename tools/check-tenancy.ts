@@ -13,6 +13,7 @@ const ROOT = join(__dirname, '..');
 const TENANT_TABLES = [
   'members', 'memberCredentials', 'sourceMessages', 'drafts', 'confirmations', 'tasks',
   'auditEvents', 'actionMeter', 'jobs', 'taskWrites', 'oauthProviders',
+  'sourceConnections', 'sourceChannels',
 ];
 
 /** Files that are allowed to name a tenant table, and why. */
