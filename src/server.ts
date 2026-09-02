@@ -14,6 +14,7 @@ import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } f
 import { cronDrain } from './routes/cron';
 import { page } from './views';
 import { configurePassport, oauthCallback, oauthError } from './routes/oauth';
+import { connectPage, connectStart, connectCallback, disconnect, channelsPage, channelsSave } from './routes/connect';
 import passport from 'passport';
 import session from 'express-session';
 import { WorkspaceScope } from './db/scope';
@@ -100,6 +101,12 @@ export function createApp() {
   app.get('/password', passwordPage);
   app.post('/password', rateLimit('password', 20, 60_000), requireCsrf, passwordChangePost);
   app.get('/members', membersPage);
+  app.get('/connect', asyncHandler(connectPage));
+  app.post('/connect/slack', rateLimit('connect', 20, 60_000), requireCsrf, asyncHandler(connectStart));
+  app.get('/connect/slack/callback', asyncHandler(connectCallback));
+  app.post('/connect/slack/disconnect', rateLimit('connect', 20, 60_000), requireCsrf, asyncHandler(disconnect));
+  app.get('/channels', asyncHandler(channelsPage));
+  app.post('/channels', rateLimit('channels', 40, 60_000), requireCsrf, asyncHandler(channelsSave));
   app.post('/members/invite', rateLimit('invite', 20, 60_000), requireCsrf, invitePost);
   app.get('/ask', askPage);
   app.post('/ask', rateLimit('ask', 30, 60_000), requireCsrf, askPost);   // not a write, but it spends

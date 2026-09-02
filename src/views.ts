@@ -36,6 +36,9 @@ td{padding:9px 6px;border-bottom:1px solid var(--line)}
 .pill{display:inline-block;font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;
   border:1px solid var(--line);border-radius:20px;padding:2px 9px;color:var(--steel)}
 .pill.ok{border-color:var(--seros);color:var(--seros)}
+.pick{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+.pick:last-child{border-bottom:none}
+.pick input{margin:0}
 footer{margin:50px 0 40px;color:var(--steel);font-size:.76rem;border-top:1px solid var(--line);padding-top:16px}
 
 /* signed-in identity and sign out */
@@ -99,6 +102,7 @@ const NAV: [string, string][] = [
   ['/tasks', 'Tasks'],
   ['/ask', 'Ask'],
   ['/digest', 'Digest'],
+  ['/connect', 'Slack'],
   ['/members', 'Members'],
   ['/audit', 'Audit'],
   ['/demo', 'Demo'],
