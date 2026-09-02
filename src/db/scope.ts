@@ -24,7 +24,7 @@ import { affectedRows } from './client';
 import { withTx } from './tx';
 import {
   workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
-  auditEvents, actionMeter, jobs, draftReasons,
+  auditEvents, actionMeter, jobs, draftReasons, taskWrites, oauthProviders,
 } from './schema';
 import { normaliseEmail } from '../password';
 
@@ -277,17 +277,78 @@ export class WorkspaceScope {
   }
 
   /**
-   * Conditional on the state that was read: if another worker got there first this
-   * updates zero rows, and the caller must not write, meter or audit again.
+   * Take the exclusive right to call the tracker for this task.
+   *
+   * The claim is a row, not a state flag on `tasks`, and it is taken BEFORE the
+   * network call while `tasks.write_state` stays 'queued'. That ordering is the
+   * fix for the failure this replaced: marking the task 'created' first meant a
+   * failed API call produced a task that claimed to exist in the customer's
+   * tracker and could never be retried, because the retry returns early on
+   * 'created'. Now nothing claims the issue exists until the tracker says so.
+   *
+   * Returns 'claimed' when this worker owns the write, 'done' when the issue
+   * already exists (another worker finished it), and 'busy' when another worker
+   * holds a live claim. A claim older than `leaseMs` is taken over: a worker
+   * that died mid-write must not block the write forever.
    */
-  async markTaskCreated(taskId: string): Promise<boolean> {
-    // affectedRows(), not `res.changes`: node-postgres reports `rowCount` and
-    // reading the missing field would turn this check into "always true".
+  async claimTaskWrite(taskId: string, leaseMs = 120_000): Promise<'claimed' | 'busy' | 'done'> {
+    const now = Date.now();
+    const inserted = await this.db.insert(taskWrites).values({
+      workspaceId: this.workspaceId, taskId, state: 'claimed', attempts: 1, claimedAt: now,
+    }).onConflictDoNothing();
+    if (affectedRows(inserted) !== 0) return 'claimed';
+
+    const row = (await this.db.select().from(taskWrites).where(and(
+      eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId))).limit(1))[0];
+    if (!row) return 'busy';                       // lost a race with a concurrent insert
+    if (row.state === 'done') return 'done';
+    if (now - row.claimedAt < leaseMs) return 'busy';
+
+    // Expired lease. Conditional on the timestamp we read, so exactly one worker
+    // can take it over however many are trying.
+    const taken = await this.db.update(taskWrites)
+      .set({ claimedAt: now, attempts: row.attempts + 1 })
+      .where(and(eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId),
+                 eq(taskWrites.state, 'claimed'), eq(taskWrites.claimedAt, row.claimedAt)));
+    return affectedRows(taken) !== 0 ? 'claimed' : 'busy';
+  }
+
+  /**
+   * The tracker answered with an id. Only now does the task claim to exist, and
+   * only from the 'queued' state, so a second completion cannot double-count.
+   */
+  async completeTaskWrite(taskId: string, result: { tracker: string; externalId: string; externalUrl: string }): Promise<boolean> {
     const res = await this.db.update(tasks)
-      .set({ writeState: 'created', threadReplyState: 'posted' })
+      // affectedRows(), not `res.changes`: node-postgres reports `rowCount` and
+      // reading the missing field would turn this check into "always true".
+      .set({ writeState: 'created' })
       .where(and(eq(tasks.workspaceId, this.workspaceId), eq(tasks.id, taskId),
                  eq(tasks.writeState, 'queued')));
-    return affectedRows(res) !== 0;
+    const first = affectedRows(res) !== 0;
+    await this.db.update(taskWrites)
+      .set({ state: 'done', tracker: result.tracker, externalId: result.externalId,
+             externalUrl: result.externalUrl, completedAt: Date.now() })
+      .where(and(eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId)));
+    return first;
+  }
+
+  /** The tracker call failed. Drop the claim so the retry can take it. */
+  async releaseTaskWrite(taskId: string): Promise<void> {
+    await this.db.delete(taskWrites).where(and(
+      eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId),
+      eq(taskWrites.state, 'claimed')));
+  }
+
+  /** The external issue this task became, if it has been written. */
+  async taskWrite(taskId: string) {
+    return (await this.db.select().from(taskWrites).where(and(
+      eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId))).limit(1))[0];
+  }
+
+  /** The thread reply is recorded when it is actually posted, never before. */
+  async markThreadReply(taskId: string, state: 'posted' | 'skipped' | 'failed'): Promise<void> {
+    await this.db.update(tasks).set({ threadReplyState: state })
+      .where(and(eq(tasks.workspaceId, this.workspaceId), eq(tasks.id, taskId)));
   }
 
   async addMember(id: string, name: string, role: 'owner'|'admin'|'confirmer'|'viewer' = 'confirmer'): Promise<void> {
@@ -306,6 +367,49 @@ export class WorkspaceScope {
       .where(and(eq(members.workspaceId, this.workspaceId), eq(memberCredentials.email, norm)))
       .innerJoin(memberCredentials, and(eq(memberCredentials.workspaceId, this.workspaceId), eq(memberCredentials.memberId, members.id)))
       .limit(1))[0];
+  }
+
+  // ---------------------------------------------------------------------
+  // OAuth sign-in. These live here, and not in src/oauth.ts, for the reason
+  // tools/check-tenancy.ts exists: `members`, `member_credentials` and
+  // `oauth_providers` are tenant-owned, so the workspace id must be injected by
+  // the scope rather than passed in by a caller who might forget.
+  // ---------------------------------------------------------------------
+
+  /** Links a provider identity to a member. Repeat calls are a no-op. */
+  async linkOAuth(memberId: string, info: { provider: 'google' | 'github'; providerUserId: string; email: string | null; name: string | null }): Promise<void> {
+    await this.db.insert(oauthProviders).values({
+      workspaceId: this.workspaceId, memberId, provider: info.provider,
+      providerUserId: info.providerUserId, email: info.email ? normaliseEmail(info.email) : null,
+      name: info.name, createdAt: Date.now(),
+    }).onConflictDoNothing();
+  }
+
+  /** The member behind a provider identity, or undefined. */
+  async memberByOAuth(provider: 'google' | 'github', providerUserId: string) {
+    const link = (await this.db.select().from(oauthProviders).where(and(
+      eq(oauthProviders.workspaceId, this.workspaceId), eq(oauthProviders.provider, provider),
+      eq(oauthProviders.providerUserId, providerUserId))).limit(1))[0];
+    if (!link) return undefined;
+    const m = await this.member(link.memberId);
+    return m ? { memberId: link.memberId, member: m } : undefined;
+  }
+
+  /** The member linked to this email through any provider, or undefined. */
+  async memberIdByOAuthEmail(email: string): Promise<string | undefined> {
+    const norm = normaliseEmail(email);
+    if (!norm) return undefined;
+    const row = (await this.db.select().from(oauthProviders).where(and(
+      eq(oauthProviders.workspaceId, this.workspaceId), eq(oauthProviders.email, norm))).limit(1))[0];
+    return row?.memberId;
+  }
+
+  /** Session invalidation stamp: when the password was last set. */
+  async passwordVersion(memberId: string): Promise<number> {
+    const row = (await this.db.select().from(memberCredentials).where(and(
+      eq(memberCredentials.workspaceId, this.workspaceId),
+      eq(memberCredentials.memberId, memberId))).limit(1))[0];
+    return Number(row?.passwordSetAt ?? 0);
   }
 
   async setDraftReason(draftId: string, reason: string, promptVersion: string): Promise<void> {

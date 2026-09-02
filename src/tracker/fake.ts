@@ -1,50 +1,48 @@
-import { TrackerWriter, TrackerWriteResult } from './interface';
+import type { TrackerTaskInput, TrackerWriteResult, TrackerWriter, TrackerOpenTask } from './interface';
 
 /**
- * Fake tracker writer for development and testing.
- * Logs the write operation but doesn't actually write to any external system.
+ * The tracker used by tests and local development.
+ *
+ * It is a real implementation of the contract - it returns an id, records what
+ * it was asked to write, and can be told to fail - not a stub that always
+ * succeeds. Tests assert on `writes`, and the worker cannot tell it apart from
+ * a network adapter.
  */
 export class FakeTrackerWriter implements TrackerWriter {
-  private readonly name: string;
+  readonly writes: TrackerTaskInput[] = [];
+  private failNext = 0;
+  private counter = 0;
 
-  constructor(name: string = 'fake-tracker') {
-    this.name = name;
+  constructor(private readonly name: string = 'fake') {}
+
+  getName(): string { return this.name; }
+  async isReady(): Promise<boolean> { return true; }
+
+  /** Make the next `n` calls throw, the way a provider outage would. */
+  failFor(n: number): void { this.failNext = n; }
+
+  async write(input: TrackerTaskInput): Promise<TrackerWriteResult> {
+    if (this.failNext > 0) {
+      this.failNext -= 1;
+      throw new Error('fake tracker: upstream unavailable');
+    }
+    // An adapter must not create twice for one idempotency key.
+    const prior = this.writes.find((w) => w.idempotencyKey === input.idempotencyKey);
+    if (prior) {
+      return { tracker: this.name, externalId: `FAKE-${this.indexOfKey(input.idempotencyKey)}`,
+               externalUrl: `https://tracker.invalid/FAKE-${this.indexOfKey(input.idempotencyKey)}`, deduped: true };
+    }
+    this.writes.push(input);
+    this.counter += 1;
+    const id = `FAKE-${this.counter}`;
+    return { tracker: this.name, externalId: id, externalUrl: `https://tracker.invalid/${id}` };
   }
 
-  getName(): string {
-    return this.name;
+  async listOpenTasks(limit = 100): Promise<TrackerOpenTask[]> {
+    return this.writes.slice(0, limit).map((w, i) => ({ externalId: `FAKE-${i + 1}`, title: w.title }));
   }
 
-  async write(confirmationId: string): Promise<void> {
-    // Simulate some async work (like network call)
-    await new Promise(resolve => setTimeout(resolve, 10));
-    
-    // Log the write (in real implementation, this would be an actual API call)
-    console.log(`[${this.name}] Writing confirmation ${confirmationId} to external tracker`);
-    
-    // In a real implementation, we might return a tracker ID
-    // For fake, we just resolve successfully
-    return;
+  private indexOfKey(key: string): number {
+    return this.writes.findIndex((w) => w.idempotencyKey === key) + 1;
   }
-
-  async isReady(): Promise<boolean> {
-    // Fake tracker is always ready
-    return true;
-  }
-}
-
-/**
- * Result helper for tracker writes
- */
-export function createTrackerWriteResult(
-  success: boolean,
-  trackerId?: string,
-  error?: string
-): TrackerWriteResult {
-  // exactOptionalPropertyTypes: an absent optional field is not the same as one
-  // present and undefined, so only set the keys we actually have.
-  const result: TrackerWriteResult = { success };
-  if (trackerId !== undefined) result.trackerId = trackerId;
-  if (error !== undefined) result.error = error;
-  return result;
 }

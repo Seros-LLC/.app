@@ -8,7 +8,13 @@
     "build:vercel": "npm run build",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "test": "SEROS_PROVIDER=fake tsx --test tests/*.test.ts"
+    "worker": "tsx src/worker.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "eval": "tsx evals/detection.ts",
+    "check:tenancy": "tsx tools/check-tenancy.ts",
+    "test": "SEROS_PROVIDER=fake SEROS_TRACKER=fake tsx --test tests/*.test.ts",
+    "verify": "npm run typecheck && npm run check:tenancy && npm test"
   },
   "dependencies": {
     "@types/express-session": "^1.19.0",

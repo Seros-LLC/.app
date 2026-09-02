@@ -72,6 +72,24 @@ npm start
 | `PGSCHEMA` | Postgres schema | `public` |
 | `SEROS_SESSION_SECRET` | Session signing key (min 16 chars) | **required** |
 | `SEROS_DETECT_THRESHOLD` | Detection confidence threshold (0-100) | `55` |
+| `SEROS_TRACKER` | Which tracker receives confirmed tasks: `linear` or `fake` | `fake` |
+| `LINEAR_API_KEY` | Linear personal API key, required when `SEROS_TRACKER=linear` | — |
+| `LINEAR_TEAM_ID` | Linear team the issues are created in | — |
+| `SEROS_TRACKER_TIMEOUT_MS` | Tracker HTTP timeout | `15000` |
+
+### The tracker write
+
+v0 writes to exactly one tracker. Which one is configuration, not code:
+`SEROS_TRACKER=linear` with a key, or `fake` for tests and local work. An
+unknown value fails the boot rather than silently writing confirmed tasks into a
+tracker nobody can see.
+
+The write is two-phase, and the order is the point. A `task_writes` row is the
+claim; the tracker is called; only when it answers with an id does
+`tasks.write_state` become `created`. Before this, the task was marked `created`
+first, so a failed call left a task that claimed to exist in a tracker it had
+never reached and the retry skipped it — a confirmed commitment that silently
+never arrived. `tests/tracker-write.test.ts` holds that case open.
 
 ## The model, and what catches it when it falls
 

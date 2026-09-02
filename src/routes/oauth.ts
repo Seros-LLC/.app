@@ -43,13 +43,13 @@ export function configurePassport() {
         let isNewMember = false;
 
         // Try to find existing member by provider
-        const existing = await findMemberByOAuth(db, workspaceId, 'google', profile.id);
+        const existing = await findMemberByOAuth(ws, 'google', profile.id);
         if (existing) {
           memberId = existing.memberId;
         } else {
           // Try to find by email in case they signed up with another provider
           if (email) {
-            const byEmail = await findMemberByEmail(db, workspaceId, email);
+            const byEmail = await findMemberByEmail(ws, email);
             if (byEmail) {
               memberId = byEmail.memberId;
             } else {
@@ -59,18 +59,18 @@ export function configurePassport() {
                 memberId = memberByEmail.members.id;
               } else {
                 // Create new member
-                memberId = await ensureMemberForOAuth(db, workspaceId, email, name);
+                memberId = await ensureMemberForOAuth(ws, email, name);
                 isNewMember = true;
               }
             }
           } else {
-            memberId = await ensureMemberForOAuth(db, workspaceId, email, name);
+            memberId = await ensureMemberForOAuth(ws, email, name);
             isNewMember = true;
           }
         }
 
         // Link the OAuth provider
-        await linkOAuth(db, workspaceId, memberId, {
+        await linkOAuth(ws, memberId, {
           provider: 'google',
           providerUserId: profile.id,
           email,
@@ -113,13 +113,13 @@ export function configurePassport() {
         let isNewMember = false;
 
         // Try to find existing member by provider
-        const existing = await findMemberByOAuth(db, workspaceId, 'github', profile.id);
+        const existing = await findMemberByOAuth(ws, 'github', profile.id);
         if (existing) {
           memberId = existing.memberId;
         } else {
           // Try to find by email in case they signed up with another provider
           if (email) {
-            const byEmail = await findMemberByEmail(db, workspaceId, email);
+            const byEmail = await findMemberByEmail(ws, email);
             if (byEmail) {
               memberId = byEmail.memberId;
             } else {
@@ -129,18 +129,18 @@ export function configurePassport() {
                 memberId = memberByEmail.members.id;
               } else {
                 // Create new member
-                memberId = await ensureMemberForOAuth(db, workspaceId, email, name);
+                memberId = await ensureMemberForOAuth(ws, email, name);
                 isNewMember = true;
               }
             }
           } else {
-            memberId = await ensureMemberForOAuth(db, workspaceId, email, name);
+            memberId = await ensureMemberForOAuth(ws, email, name);
             isNewMember = true;
           }
         }
 
         // Link the OAuth provider
-        await linkOAuth(db, workspaceId, memberId, {
+        await linkOAuth(ws, memberId, {
           provider: 'github',
           providerUserId: profile.id,
           email,
@@ -182,14 +182,14 @@ export async function oauthCallback(req: any, res: Response, next: NextFunction)
 
       try {
         const db = openDb();
-        const pv = await getPasswordVersion(db, user.workspaceId, user.memberId);
-        const session = startSession(res, { 
-          workspaceId: user.workspaceId, 
-          memberId: user.memberId, 
-          pv 
+        const scope = await WorkspaceScope.open(db, user.workspaceId);
+        const pv = await getPasswordVersion(scope, user.memberId);
+        startSession(res, {
+          workspaceId: user.workspaceId,
+          memberId: user.memberId,
+          pv
         });
 
-        const scope = await WorkspaceScope.open(db, user.workspaceId);
         await scope.audit('session.oauth.login', 'ok', 
           { member_id: user.memberId, provider: req.query.provider as string || 'unknown' },
           { actorType: 'member', actorId: user.memberId, objectType: 'member', objectId: user.memberId }
