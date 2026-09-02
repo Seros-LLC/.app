@@ -1,14 +1,14 @@
 /**
  * OAuth provider management.
  *
- * Manages OAuth providers (Google, GitHub) linked to member accounts.
+ * Every statement here goes through WorkspaceScope. This file used to import
+ * `members` and `member_credentials` directly and take a workspace id as an
+ * argument, which tools/check-tenancy.ts fails the build for: a workspace id a
+ * caller passes in is a convention, and a convention is what a tenancy bug looks
+ * like before it happens.
  */
 
-import { and, eq } from 'drizzle-orm';
-import { affectedRows } from './db/client';
-import { memberCredentials, oauthProviders, members } from './db/schema';
-
-type Db = ReturnType<typeof import('./db/client').openDb>;
+import type { WorkspaceScope } from './db/scope';
 
 export type OAuthProvider = 'google' | 'github';
 export type OAuthInfo = {
@@ -19,97 +19,34 @@ export type OAuthInfo = {
 };
 
 /**
- * Ensure a member exists for the given email, or create one.
+ * The member for an OAuth identity, created on first sign-in.
+ *
+ * New accounts are created as `viewer`. A viewer cannot confirm (ADR 0002 and
+ * src/routes/confirm.ts enforce that), so signing in with Google never grants
+ * the one privilege the product sells; an admin promotes deliberately.
  */
-export async function ensureMemberForOAuth(db: Db, workspaceId: string, email: string | null, name: string | null): Promise<string> {
-  const memberId = email ? email.toLowerCase().split('@')[0] + '-' + Buffer.from(email).toString('base64url').slice(0, 8) : 'oauth-' + Math.random().toString(36).slice(2, 10);
-
-  const existing = await db.select().from(members)
-    .where(and(eq(members.workspaceId, workspaceId), eq(members.id, memberId)))
-    .limit(1);
-
-  if (existing.length === 0) {
-    await db.insert(members).values({
-      workspaceId,
-      id: memberId,
-      name: name || email || 'OAuth User',
-      role: 'viewer',
-      status: 'active',
-    });
-  }
-
+export async function ensureMemberForOAuth(scope: WorkspaceScope, email: string | null, name: string | null): Promise<string> {
+  const memberId = email
+    ? `${email.toLowerCase().split('@')[0]}-${Buffer.from(email.toLowerCase()).toString('base64url').slice(0, 8)}`
+    : `oauth-${Math.random().toString(36).slice(2, 10)}`;
+  const existing = await scope.member(memberId);
+  if (!existing) await scope.addMember(memberId, name || email || 'OAuth User', 'viewer');
   return memberId;
 }
 
-/**
- * Link an OAuth provider to a member.
- */
-export async function linkOAuth(db: Db, workspaceId: string, memberId: string, info: OAuthInfo): Promise<void> {
-  const now = Date.now();
-  await db.insert(oauthProviders)
-    .values({
-      workspaceId,
-      memberId,
-      provider: info.provider,
-      providerUserId: info.providerUserId,
-      email: info.email,
-      name: info.name,
-      createdAt: now,
-    })
-    .onConflictDoNothing();
+export async function linkOAuth(scope: WorkspaceScope, memberId: string, info: OAuthInfo): Promise<void> {
+  await scope.linkOAuth(memberId, info);
 }
 
-/**
- * Find a member by OAuth provider and user ID.
- */
-export async function findMemberByOAuth(db: Db, workspaceId: string, provider: OAuthProvider, providerUserId: string): Promise<{ memberId: string; member: any } | null> {
-  const rows = await db.select()
-    .from(oauthProviders)
-    .where(and(
-      eq(oauthProviders.workspaceId, workspaceId),
-      eq(oauthProviders.provider, provider),
-      eq(oauthProviders.providerUserId, providerUserId)
-    ))
-    .limit(1);
-
-  if (rows.length === 0) return null;
-
-  const row = rows[0]!;
-  const member = await db.select().from(members)
-    .where(and(eq(members.workspaceId, workspaceId), eq(members.id, row.memberId)))
-    .limit(1);
-
-  if (member.length === 0) return null;
-
-  return { memberId: row.memberId, member: member[0]! } as { memberId: string; member: any };
+export async function findMemberByOAuth(scope: WorkspaceScope, provider: OAuthProvider, providerUserId: string) {
+  return (await scope.memberByOAuth(provider, providerUserId)) ?? null;
 }
 
-/**
- * Find a member by email across all OAuth providers.
- */
-export async function findMemberByEmail(db: Db, workspaceId: string, email: string): Promise<{ memberId: string } | null> {
-  const rows = await db.select()
-    .from(oauthProviders)
-    .where(and(
-      eq(oauthProviders.workspaceId, workspaceId),
-      eq(oauthProviders.email, email.toLowerCase())
-    ))
-    .limit(1);
-
-  if (rows.length === 0) return null;
-
-  return { memberId: rows[0]!.memberId } as { memberId: string };
+export async function findMemberByEmail(scope: WorkspaceScope, email: string): Promise<{ memberId: string } | null> {
+  const memberId = await scope.memberIdByOAuthEmail(email);
+  return memberId ? { memberId } : null;
 }
 
-/**
- * Get password version for a member (for session invalidation).
- */
-export async function getPasswordVersion(db: Db, workspaceId: string, memberId: string): Promise<number> {
-  const row = await db.select().from(memberCredentials)
-    .where(and(
-      eq(memberCredentials.workspaceId, workspaceId),
-      eq(memberCredentials.memberId, memberId)
-    ))
-    .limit(1);
-  return (row[0]?.passwordSetAt ?? 0) as number;
+export async function getPasswordVersion(scope: WorkspaceScope, memberId: string): Promise<number> {
+  return scope.passwordVersion(memberId);
 }

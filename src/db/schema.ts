@@ -126,6 +126,25 @@ export const tasks = sqliteTable('tasks', {
   uniqueIndex('uniq_confirm_task').on(t.workspaceId,t.confirmationId)
 ]);
 
+// The tracker write lease and its result (migration 0010_task_writes.sql).
+// A sidecar rather than columns on `tasks` because `tasks.write_state` carries a
+// CHECK constraint from 0001 and SQLite cannot alter one in place. The row is
+// the claim: exactly one worker may hold it, and `tasks.write_state='created'`
+// is set only after the tracker has actually answered with an id.
+export const taskWrites = sqliteTable('task_writes', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  taskId: text('task_id').notNull(),
+  state: text('state', { enum:['claimed','done'] }).notNull().default('claimed'),
+  tracker: text('tracker'),
+  externalId: text('external_id'),
+  externalUrl: text('external_url'),
+  attempts: integer('attempts').notNull().default(0),
+  claimedAt: integer('claimed_at').notNull(),
+  completedAt: integer('completed_at'),
+}, (t)=>[
+  primaryKey({columns:[t.workspaceId,t.taskId]}),
+]);
+
 // M11: the audit row is the brief's AuditEvent (§1.11) and lives in `audit_log`,
 // owned by migration 0005_audit_append_only.sql. That migration also installs the
 // BEFORE UPDATE / BEFORE DELETE triggers that RAISE(ABORT), so append-only holds

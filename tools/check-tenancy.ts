@@ -12,7 +12,7 @@ import { join, relative } from 'node:path';
 const ROOT = join(__dirname, '..');
 const TENANT_TABLES = [
   'members', 'memberCredentials', 'sourceMessages', 'drafts', 'confirmations', 'tasks',
-  'auditEvents', 'actionMeter', 'jobs',
+  'auditEvents', 'actionMeter', 'jobs', 'taskWrites', 'oauthProviders',
 ];
 
 /** Files that are allowed to name a tenant table, and why. */

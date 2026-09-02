@@ -76,23 +76,59 @@ async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, 
   await explainDraft(db, scope, draftId, body);
 }
 
-/** The tracker service handles writing to external trackers. */
+/**
+ * Create the confirmed task in the customer's tracker.
+ *
+ * Order matters, and it is the opposite of what this function used to do. The
+ * task is marked 'created' only after the tracker answers with an id. Marking it
+ * first meant a failed API call left a task that claimed to exist in a tracker
+ * it had never reached, and the retry returned early on 'created' - a confirmed
+ * commitment silently never arrived. The claim (a task_writes row) is what stops
+ * two workers writing twice; 'created' is reserved for what is true.
+ */
 async function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: string, confirmationId: string) {
   const scope = await WorkspaceScope.open(db, workspaceId);
   const job = await scope.writeJob(confirmationId);
   if (!job) throw new Error('no confirmation: refusing to write');   // ADR 0002
   if (job.conf.decision === 'rejected') return;
   if (!job.task) throw new Error('no task row');
-  if (job.task.writeState === 'created') return;                     // already written
-  if (!(await scope.markTaskCreated(job.task.id))) return;           // another worker won
-  
-  // Write to external tracker using the tracker service
-  const trackerService = TrackerService.getInstance();
-  await trackerService.getWriter().write(confirmationId);
-  
+  if (job.task.writeState === 'created') return;                     // already in the tracker
+
+  const claim = await scope.claimTaskWrite(job.task.id);
+  if (claim === 'done') return;                                      // another worker finished it
+  if (claim === 'busy') return;                                      // another worker is mid-write
+
+  const writer = TrackerService.getInstance().getWriter();
+  let result;
+  try {
+    result = await writer.write({
+      workspaceId,
+      taskId: job.task.id,
+      confirmationId,
+      idempotencyKey: job.task.idempotencyKey,
+      title: job.draft?.title ?? '(untitled)',
+      outcome: job.draft?.outcome ?? '',
+      owner: job.draft?.suggestedOwner ?? null,
+      dueDate: job.draft?.suggestedDueDate ?? null,
+      sourcePermalink: null,
+      context: null,
+      labels: [],
+    });
+  } catch (e) {
+    // Drop the claim so the retry can take it, and leave write_state 'queued':
+    // nothing in the system may claim this task exists in the tracker.
+    await scope.releaseTaskWrite(job.task.id);
+    await scope.audit('task.write_failed', 'failed', { task_id: job.task.id, confirmation_id: confirmationId, tracker: writer.getName() });
+    throw e;                                                         // retried with backoff
+  }
+
+  const first = await scope.completeTaskWrite(job.task.id, result);
+  if (!first) return;                                                // already accounted for
   await scope.audit('task.created', 'ok',
-    { task_id: job.task.id, confirmation_id: confirmationId, idempotency_key: job.task.idempotencyKey });
-  console.log(JSON.stringify({ level: 'info', event: 'tracker.write', task_id: job.task.id, title_len: (job.draft?.title ?? '').length }));
+    { task_id: job.task.id, confirmation_id: confirmationId, idempotency_key: job.task.idempotencyKey,
+      tracker: result.tracker, external_id: result.externalId, deduped: result.deduped === true ? 1 : 0 });
+  console.log(JSON.stringify({ level: 'info', event: 'tracker.write', task_id: job.task.id,
+    tracker: result.tracker, external_id: result.externalId, title_len: (job.draft?.title ?? '').length }));
 }
 
 export async function tick(db: ReturnType<typeof openDb>): Promise<boolean> {
