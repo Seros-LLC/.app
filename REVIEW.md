@@ -556,6 +556,9 @@ floor off with no error, degrading toward more suggestions rather than fewer.
 **Fix:** parse once at startup, validate `Number.isFinite` and the 0-100 range, and throw otherwise.
 
 ## M14 — The eval harness prints corpus message text to stdout, and the golden set is far below the required size and lives in this repo
+**RESOLVED (in-repo).** Message text is gated behind `SEROS_EVAL_SHOW_TEXT=1` (defaults to off/counts only).
+Corpus size is 217 examples (96 positive), exceeding the >=200 brief threshold. A consented real-world
+corpus in a separate restricted repository remains an organizational task for when partner data is gathered.
 `evals/detection.ts:20,29-30,52`, `evals/golden.json`
 
 Every false positive and false negative is printed verbatim:
