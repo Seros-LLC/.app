@@ -17,7 +17,7 @@
  * `(await q.limit(1))[0]` instead of `.get()`, and a row count is read through
  * affectedRows(), which knows about both `changes` and `rowCount`.
  */
-import { and, eq, desc, inArray } from 'drizzle-orm';
+import { and, eq, desc, inArray, sql } from 'drizzle-orm';
 import { randomUUID, createHash } from 'node:crypto';
 import type { openDb } from './client';
 import { affectedRows } from './client';
@@ -25,7 +25,7 @@ import { withTx } from './tx';
 import {
   workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
   auditEvents, actionMeter, jobs, draftReasons, taskWrites, oauthProviders,
-  sourceConnections, sourceChannels,
+  sourceConnections, sourceChannels, confirmationEdits,
 } from './schema';
 import { normaliseEmail } from '../password';
 
@@ -147,13 +147,19 @@ export class WorkspaceScope {
   }
   /** The tasks page needs a join; it does NOT need the tables. */
   async taskRows(limit = 100) {
+    // The page shows the task as AGREED, so an edited field wins over the model's
+    // proposal; the draft is the fallback for every field the human left alone.
+    // The join is LEFT because most confirmations carry no edits at all.
     return await this.db.select({
         id: tasks.id, writeState: tasks.writeState, createdAt: tasks.createdAt,
-        title: drafts.title, owner: drafts.suggestedOwner, due: drafts.suggestedDueDate,
+        title: sql<string>`coalesce(${confirmationEdits.title}, ${drafts.title})`,
+        owner: sql<string | null>`coalesce(${confirmationEdits.owner}, ${drafts.suggestedOwner})`,
+        due: sql<string | null>`coalesce(${confirmationEdits.dueDate}, ${drafts.suggestedDueDate})`,
         memberId: confirmations.memberId,
       }).from(tasks)
       .innerJoin(confirmations, and(eq(confirmations.workspaceId, tasks.workspaceId), eq(confirmations.id, tasks.confirmationId)))
       .innerJoin(drafts, and(eq(drafts.workspaceId, confirmations.workspaceId), eq(drafts.id, confirmations.draftId)))
+      .leftJoin(confirmationEdits, and(eq(confirmationEdits.workspaceId, confirmations.workspaceId), eq(confirmationEdits.confirmationId, confirmations.id)))
       .where(eq(tasks.workspaceId, this.workspaceId))
       .orderBy(desc(tasks.createdAt)).limit(limit);
   }
@@ -198,6 +204,32 @@ export class WorkspaceScope {
 
 
 
+    // Which fields the human actually moved, and to what.
+    //
+    // The draft row is what the MODEL proposed and is immutable from here on. This
+    // used to be an UPDATE against `drafts`, which destroyed the model's proposal:
+    // afterwards "the model got it right and the human agreed" and "the model got
+    // it wrong and the human rewrote it" were indistinguishable, so acceptance rate
+    // and owner accuracy could not be computed at all. ADR 0002 calls this loop the
+    // product's only compounding data asset, and REVIEW.md M6 is explicit that edits
+    // are data, not discards. The human's values go in a sidecar instead.
+    //
+    // A field is recorded only when it actually differs from the draft, so NULL in
+    // the sidecar reads as "the human left this alone" rather than "changed it to
+    // the same thing".
+    const edited = edits && decision === 'confirmed_with_edits'
+      ? {
+          title: edits.title !== undefined && edits.title !== d.title ? edits.title : null,
+          outcome: edits.outcome !== undefined && edits.outcome !== d.outcome ? edits.outcome : null,
+          owner: (edits.suggestedOwner ?? null) !== (d.suggestedOwner ?? null) ? (edits.suggestedOwner ?? null) : null,
+          dueDate: (edits.suggestedDueDate ?? null) !== (d.suggestedDueDate ?? null) ? (edits.suggestedDueDate ?? null) : null,
+        }
+      : null;
+    const changed = edited
+      ? (['title', 'outcome', 'owner', 'due_date'] as const)
+          .filter((_, i) => [edited.title, edited.outcome, edited.owner, edited.dueDate][i] !== null)
+      : [];
+
     const confirmationId = randomUUID();
     try {
       // withTx(), not db.transaction(): the two drivers disagree about whether the
@@ -214,27 +246,28 @@ export class WorkspaceScope {
             idempotencyKey: confirmationId, createdAt: Date.now(),
           });
         }
+        // In the SAME transaction as the confirmation it belongs to: an edit that
+        // outlived a rolled-back confirm would be an edit to nothing, and the
+        // tracker writer reads these values to decide what to create.
+        if (edited) {
+          await tx.insert(confirmationEdits).values({
+            workspaceId: this.workspaceId, confirmationId,
+            editedFields: changed.join(','),
+            title: edited.title, outcome: edited.outcome,
+            owner: edited.owner, dueDate: edited.dueDate,
+            createdAt: Date.now(),
+          });
+        }
       });
     } catch {
       // the UNIQUE (workspace_id, draft_id) index lost a race with another confirmer
       return { ok: false as const, reason: 'already_confirmed' };
     }
 
-    if (edits && decision === 'confirmed_with_edits') {
-      // What the human changed is the training signal for routing later, so record
-      // WHICH fields moved. The values themselves are content and stay out of audit.
-      const changed = [
-        edits.title !== undefined && edits.title !== d.title ? 'title' : null,
-        edits.outcome !== undefined && edits.outcome !== d.outcome ? 'outcome' : null,
-        (edits.suggestedOwner ?? null) !== (d.suggestedOwner ?? null) ? 'owner' : null,
-        (edits.suggestedDueDate ?? null) !== (d.suggestedDueDate ?? null) ? 'due_date' : null,
-      ].filter(Boolean) as string[];
+    if (edited) {
+      // WHICH fields moved is signal for routing later; the values themselves are
+      // customer content and stay out of the audit log.
       await this.audit('draft.edited', 'ok', { draft_id: draftId, edited_fields: changed.join(','), edited_count: changed.length });
-      await this.db.update(drafts).set({
-        title: edits.title ?? d.title, outcome: edits.outcome ?? d.outcome,
-        suggestedOwner: edits.suggestedOwner ?? d.suggestedOwner,
-        suggestedDueDate: edits.suggestedDueDate ?? d.suggestedDueDate,
-      }).where(and(eq(drafts.workspaceId, this.workspaceId), eq(drafts.id, draftId)));
     }
 
     await this.db.update(drafts).set({ state: decision === 'rejected' ? 'rejected' : 'confirmed' })
@@ -274,7 +307,20 @@ export class WorkspaceScope {
       eq(tasks.workspaceId, this.workspaceId), eq(tasks.confirmationId, confirmationId))).limit(1))[0];
     const draft = (await this.db.select().from(drafts).where(and(
       eq(drafts.workspaceId, this.workspaceId), eq(drafts.id, conf.draftId))).limit(1))[0];
-    return { conf, task, draft };
+    // What the human changed, if anything. The tracker must receive the values the
+    // human AGREED to, not the ones the model proposed — writing the model's words
+    // into the customer's tracker after a human corrected them is the failure this
+    // whole sidecar exists to prevent.
+    const edit = (await this.db.select().from(confirmationEdits).where(and(
+      eq(confirmationEdits.workspaceId, this.workspaceId),
+      eq(confirmationEdits.confirmationId, confirmationId))).limit(1))[0];
+    const agreed = draft && {
+      title: edit?.title ?? draft.title,
+      outcome: edit?.outcome ?? draft.outcome,
+      owner: edit?.owner ?? draft.suggestedOwner,
+      dueDate: edit?.dueDate ?? draft.suggestedDueDate,
+    };
+    return { conf, task, draft, edit, agreed };
   }
 
   /**

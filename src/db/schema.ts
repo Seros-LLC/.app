@@ -113,6 +113,26 @@ export const confirmations = sqliteTable('confirmations', {
   uniqueIndex('uniq_confirm_draft').on(t.workspaceId,t.draftId)
 ]);
 
+// What the human changed at confirm time (0012_confirmation_edits).
+//
+// The draft row is what the MODEL proposed and is immutable after drafting;
+// this is what the HUMAN agreed to. Keeping them apart is the whole point:
+// overwriting the draft made "model was right" and "model was wrong and the
+// human rewrote it" indistinguishable, and acceptance rate uncomputable.
+// A NULL field here means the human did not change that field.
+export const confirmationEdits = sqliteTable('confirmation_edits', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  confirmationId: text('confirmation_id').notNull(),
+  editedFields: text('edited_fields').notNull(),  // 'title,owner' — names only
+  title: text('title'),
+  outcome: text('outcome'),
+  owner: text('owner'),
+  dueDate: text('due_date'),
+  createdAt: integer('created_at').notNull(),
+}, (t)=>[
+  primaryKey({columns:[t.workspaceId,t.confirmationId]})
+]);
+
 export const tasks = sqliteTable('tasks', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
   id: text('id').notNull(),
@@ -123,7 +143,11 @@ export const tasks = sqliteTable('tasks', {
   createdAt: integer('created_at').notNull(),
 }, (t)=>[
   primaryKey({columns:[t.workspaceId,t.id]}),
-  uniqueIndex('uniq_confirm_task').on(t.workspaceId,t.confirmationId)
+  uniqueIndex('uniq_confirm_task').on(t.workspaceId,t.confirmationId),
+  // Declared here to match what 0004_hardening.sql actually created (M9); the
+  // name must be that migration's, or drizzle would propose a second identical
+  // index alongside it.
+  uniqueIndex('tasks_idempotency_key').on(t.workspaceId,t.idempotencyKey)
 ]);
 
 // The Slack connection and the channels the admin chose (0011_source_connections).

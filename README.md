@@ -230,13 +230,16 @@ with its outcome (`ok`, `timeout`, `invalid_output`, `provider_error`,
 
 This project uses:
 - TypeScript for type safety
-- ESLint and Prettier for code formatting
 - Jest-style tests with `tsx --test`
 
 ### Linting
 
-Run `npm run lint` to check code style, or `npm run lint:fix` to automatically fix
-fixable issues.
+There is no linter wired up. A legacy `.eslintrc.cjs` is still in the tree, but
+ESLint is not a dependency and that config format is not read by ESLint 9, so
+`npm run lint` and `make lint` did not exist / did not work; the commands were
+removed rather than left as documentation for something that fails. The gates
+that do run are `npm run typecheck`, `npm run check:tenancy` and `npm test`,
+all three of which `npm run verify` runs together.
 
 ### Type Checking
 
@@ -252,5 +255,4 @@ For developers who prefer Make, the following targets are available:
 - `make dev` - start the web app in development mode
 - `make worker` - start the background worker
 - `make test` - run tests
-- `make lint` - run linter
-- `make fmt` - format code
+- `make verify` - typecheck + tenancy check + tests
