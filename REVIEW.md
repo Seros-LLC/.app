@@ -472,6 +472,13 @@ asset, and the acceptance-rate and owner-accuracy metrics become uncomputable.
 final values there, and leave the draft row as the model wrote it.
 
 ## M7 — Drafts never expire
+**FIXED.** `drafts.expires_at` now exists and `createDraft()` stamps created_at + 14 days
+(brief §6 Q14 left the lifetime open; 14 days is the decision, overridable per draft and via
+`SEROS_DRAFT_TTL_DAYS`). The sweep machinery in limits.ts was already built and wired into
+`runMaintenance()` — only the column was missing, and its `COALESCE(expires_at, created_at + ttl)`
+branch activates now that it exists. SQLite gets the column from a guarded ALTER in
+`migrateSqlite()` (no `ADD COLUMN IF NOT EXISTS` in SQLite, and migrations re-run every boot);
+Postgres from `migrations/pg/0013_draft_expires_at.sql`. Covered by tests/draft-expiry.test.ts.
 `src/db/schema.ts:39-55` (no `expires_at`), `src/db/scope.ts:127`
 
 The brief makes `expires_at` a required column with an `expired` terminal state; the app has the enum

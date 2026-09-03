@@ -26,6 +26,7 @@ import {
   workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
   auditEvents, actionMeter, jobs, draftReasons, taskWrites, oauthProviders,
   sourceConnections, sourceChannels, confirmationEdits,
+  DAY_MS, DEFAULT_DRAFT_TTL_DAYS,
 } from './schema';
 import { normaliseEmail } from '../password';
 
@@ -124,13 +125,19 @@ export class WorkspaceScope {
   // ---- drafts ----
   async createDraft(d: { sourceMessageId: string; title: string; outcome: string;
                          kind: 'commitment'|'request'|'decision'; confidence: number;
-                         suggestedOwner: string | null; suggestedDueDate: string | null; provider: string }): Promise<string> {
+                         suggestedOwner: string | null; suggestedDueDate: string | null; provider: string;
+                         expiresAt?: number }): Promise<string> {
     const id = randomUUID();
+    const now = Date.now();
     await this.db.insert(drafts).values({
       workspaceId: this.workspaceId, id, sourceMessageId: d.sourceMessageId,
       title: d.title, outcome: d.outcome, kind: d.kind, confidence: Math.round(d.confidence),
       suppressedReason: null, suggestedDueDate: d.suggestedDueDate, suggestedOwner: d.suggestedOwner,
-      state: 'pending', provider: d.provider, createdAt: Date.now(),
+      state: 'pending', provider: d.provider, createdAt: now,
+      // Every draft carries its own deadline (brief §1.5) rather than the sweeper
+      // inferring one from created_at, so a per-workspace or per-plan lifetime is a
+      // change at the point of writing and not a rewrite of the sweep query.
+      expiresAt: d.expiresAt ?? now + DEFAULT_DRAFT_TTL_DAYS * DAY_MS,
     });
     await this.audit('draft.created', 'ok', { draft_id: id, confidence: Math.round(d.confidence) });
     return id;

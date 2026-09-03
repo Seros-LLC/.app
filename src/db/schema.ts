@@ -4,6 +4,16 @@
 import { sqliteTable, text, integer, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';   // M11: database-side default for audit request ids
 
+// Declared here because this module is a leaf — it imports only drizzle — so both
+// db/scope.ts (which stamps a deadline onto every new draft) and limits.ts (which
+// sweeps expired ones) can share these without an import cycle. limits.ts imports
+// WorkspaceScope from scope.ts, so the constants cannot live there.
+export const DAY_MS = 86_400_000;
+// The brief (§6, Q14) deliberately leaves the draft lifetime open. Fourteen days is
+// the answer: long enough to survive a fortnight's holiday, short enough that
+// unreviewed customer content does not sit in the database indefinitely.
+export const DEFAULT_DRAFT_TTL_DAYS = 14;
+
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -79,8 +89,12 @@ export const drafts = sqliteTable('drafts', {
   state: text('state', { enum:['pending','confirmed','rejected','expired','superseded'] }).notNull().default('pending'),
   provider: text('provider'),
   createdAt: integer('created_at').notNull(),
+  // When this draft stops being actionable. NULLABLE on purpose: rows written before
+  // the column existed have no deadline, and the sweeper falls back to
+  // created_at + TTL for them rather than treating NULL as "never expires".
+  expiresAt: integer('expires_at'),
 }, (t)=>[
-  primaryKey({columns:[t.workspaceId,t.id]})
+  primaryKey({columns:[t.workspaceId,t.id]}),
 ]);
 
 // The model-written "why this was read as a commitment", one row per draft
