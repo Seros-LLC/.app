@@ -455,6 +455,9 @@ but the guarantee is convention, not construction — and invariant 20 plus the 
 modules, and add the lint/static check the brief requires.
 
 ## M6 — Confirming with edits destroys the model's suggestion and records no `edited_fields`
+**FIXED c46cf9b.** Draft is immutable after drafting; the human's values go to the
+`confirmation_edits` sidecar, written in the confirm transaction. Readers coalesce edit over
+draft (`writeJob().agreed`, worker, `taskRows`). Covered by `tests/confirmation-edits.test.ts`.
 `src/db/scope.ts:143-149`, `src/db/schema.ts:57-68`
 
 Edits are applied with `UPDATE drafts SET title=…, outcome=…` in place, and the `confirmations` table
@@ -493,6 +496,9 @@ published retention promise is unimplemented.
 window or does not run.
 
 ## M9 — `tasks.idempotency_key` is not unique
+**ALREADY FIXED (finding was stale).** `0004_hardening.sql` created the unique index
+`tasks_idempotency_key (workspace_id, idempotency_key)`. Only `schema.ts` failed to declare it,
+which would have let drizzle propose a duplicate; declared as of c46cf9b.
 `src/db/schema.ts:76`, migration `tasks`
 
 Brief 1.7 requires `idempotency_key text req **unique**`. Only `(workspace_id, confirmation_id)` is
