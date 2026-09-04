@@ -32,23 +32,6 @@ function generatePassword(): string {
   return crypto.randomBytes(24).toString('base64url');
 }
 
-export async function ensureDefaultSeedMembers(db: ReturnType<typeof openDb>, scope: WorkspaceScope): Promise<void> {
-  const creds = MemberCredentials.for(db, scope);
-  const people = [
-    { id: 'u-ana', name: 'Ana Okafor', role: 'owner' as const, email: 'admin@seros.dev' },
-    { id: 'u-bo', name: 'Bo Lindqvist', role: 'confirmer' as const, email: 'bo@demo.invalid' },
-    { id: 'u-vic', name: 'Vic Reyes', role: 'viewer' as const, email: 'vic@demo.invalid' },
-  ];
-  for (const p of people) {
-    await scope.addMember(p.id, p.name, p.role);
-    await creds.setEmail(p.id, p.email);
-    const row = await creds.get(p.id);
-    if (!row?.passwordHash) {
-      await creds.setPassword(p.id, await hashPassword('password123'));
-    }
-  }
-}
-
 async function main() {
   await migrateDbAsync();
   const db = openDb();
@@ -92,7 +75,9 @@ async function main() {
   }));
 }
 
-main().catch((err) => {
-  console.error(JSON.stringify({ level: 'error', event: 'seed.failed', error: String(err?.message ?? err) }));
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(JSON.stringify({ level: 'error', event: 'seed.failed', error: String(err?.message ?? err) }));
+    process.exitCode = 1;
+  });
+}

@@ -5,15 +5,13 @@
  * this platform that owns "apply the schema" and every migration in this repo is
  * written to be a no-op when it has already run.
  */
-if (!process.env.SEROS_SESSION_SECRET) {
-  process.env.SEROS_SESSION_SECRET = 'seros-vercel-session-secret-fallback-key-32b';
-}
-if (!process.env.SEROS_SIGNING_SECRET) {
-  process.env.SEROS_SIGNING_SECRET = 'seros-vercel-signing-secret-fallback-key-32b';
-}
-
 import { createApp } from '../src/server';
 import { migrateDbAsync } from '../src/db/client';
+import { validateServerlessEnvironment } from '../src/deployment';
+
+// A serverless deployment without real credentials or durable storage is a
+// failed deployment, not a public demo with source-controlled keys and /tmp data.
+validateServerlessEnvironment();
 
 // On Postgres the migration is asynchronous, so the first request must WAIT for
 // it instead of racing it: one promise per cold start, awaited by every request

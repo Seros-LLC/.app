@@ -24,7 +24,6 @@ import {
 } from '../password';
 import { page, esc } from '../views';
 import { generateCaptcha, verifyCaptcha } from '../captcha';
-import { ensureDefaultSeedMembers } from '../seed';
 import type { PageContext } from '../views';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
@@ -51,10 +50,6 @@ const flash = (req: Request, key: string) =>
 // ---------------------------------------------------------------------------
 
 export async function loginPage(req: Request, res: Response) {
-  const db = openDb();
-  const scope = await WorkspaceScope.ensure(db, WS());
-  await ensureDefaultSeedMembers(db, scope);
-
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
   const captcha = generateCaptcha();
@@ -77,17 +72,10 @@ export async function loginPage(req: Request, res: Response) {
   ${msgBanner}
   <form class="card" method="post" action="/login">
     <label for="identifier">Email or member id</label>
-    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="admin@seros.dev" required>
+    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="" required>
     
     <label for="password" style="margin-top:12px;">Password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="current-password" value="password123" required>
-
-    <div style="margin-top:14px; padding:12px 14px; background:rgba(0,9,173,.04); border:1px solid rgba(0,9,173,.18); border-radius:4px;">
-      <p class="meta" style="margin:0 0 4px; font-weight:600; color:var(--seros-blue); font-size:.85rem;">Demo Credentials</p>
-      <div style="font-size:.82rem;">
-        Email / ID: <code>admin@seros.dev</code> | Password: <code>password123</code>
-      </div>
-    </div>
+    <input id="password" type="password" name="password" size="34" autocomplete="current-password" value="" required>
 
     <div style="margin-top:16px; padding:14px; background:rgba(237,231,222,.4); border:1px solid var(--line); border-radius:4px;">
       <label for="captchaAnswer" style="margin-bottom:8px;">Human Verification (CAPTCHA)</label>
@@ -131,20 +119,21 @@ export async function loginPost(req: Request, res: Response) {
     return res.redirect(303, '/login?err=captcha_failed');
   }
 
+  const identifier = String(req.body?.identifier ?? req.body?.memberId ?? req.body?.email ?? '').trim().slice(0, 320);
+  const password = String(req.body?.password ?? '');
   const db = openDb();
   const ws = WS();
   let scope: WorkspaceScope;
   try {
     scope = await WorkspaceScope.open(db, ws);
   } catch {
-    scope = await WorkspaceScope.ensure(db, ws);
+    // An anonymous request must never provision a tenant. Pay the same scrypt cost
+    // as a bad password and return the same response as every other denial.
+    await verifyPassword(password, null);
+    return deny(res, null, null, 'unknown_identifier');
   }
-  await ensureDefaultSeedMembers(db, scope);
   const creds = MemberCredentials.for(db, scope);
   const now = Date.now();
-
-  const identifier = String(req.body?.identifier ?? req.body?.memberId ?? req.body?.email ?? '').trim().slice(0, 320);
-  const password = String(req.body?.password ?? '');
 
   // email OR member id: an address wins if it resolves, otherwise it is an id.
   const email = normaliseEmail(identifier);
@@ -251,21 +240,26 @@ export async function logoutPost(req: Request, res: Response) {
 export async function setPasswordPage(req: Request, res: Response) {
   const token = String(req.query.token ?? req.body?.token ?? '');
   const db = openDb();
-  const scope = await WorkspaceScope.ensure(db, WS());
-  const creds = MemberCredentials.for(db, scope);
-  const ok = token.length > 0 && await creds.inviteValid(token);
+  let scope: WorkspaceScope | null = null;
+  try { scope = await WorkspaceScope.open(db, WS()); } catch { /* invalid link */ }
+  const creds = scope ? MemberCredentials.for(db, scope) : null;
+  const ok = token.length > 0 && !!creds && await creds.inviteValid(token);
   const err = flash(req, 'err');
 
-  const body = `<h1>Sign in</h1>
-  <p class="sub">Your email address or your member id, and your password.</p>
-  <div class="empty">${DENIED}</div>
-  <form class="card" method="post" action="/login">
-    <label for="identifier">Email or member id</label>
-    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
-    <label for="password">Password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
-    <div class="row"><button class="primary" type="submit">Sign in</button></div>
-  </form>`;
+  const body = `<h1>Choose a password</h1>
+  ${ok
+    ? `<p class="sub">This link works once and then stops working. Minimum ${esc(String(passwordMinLength()))} characters.</p>
+       ${err ? `<div class="empty">${esc(err)}</div>` : ''}
+       <form class="card" method="post" action="/set-password">
+         <input type="hidden" name="token" value="${esc(token)}">
+         <label for="password">New password</label>
+         <input id="password" type="password" name="password" size="34" autocomplete="new-password">
+         <label for="confirm">New password again</label>
+         <input id="confirm" type="password" name="confirm" size="34" autocomplete="new-password">
+         <div class="row"><button class="primary" type="submit">Set password</button></div>
+       </form>`
+    : `<div class="empty">That invite link is not usable. Invites are single use and expire;
+       ask an admin for another.</div>`}`;
   res.type('html').send(page('Choose a password', '/login', body));
 }
 
@@ -275,7 +269,9 @@ export async function setPasswordPost(req: Request, res: Response) {
   const confirm = String(req.body?.confirm ?? '');
   const db = openDb();
   const ws = WS();
-  const scope = await WorkspaceScope.ensure(db, ws);
+  let scope: WorkspaceScope;
+  try { scope = await WorkspaceScope.open(db, ws); }
+  catch { return res.redirect(303, '/set-password'); }
   const creds = MemberCredentials.for(db, scope);
 
   const problem = passwordPolicyError(password) ?? (password === confirm ? null : 'Those two passwords are not the same.');
@@ -321,15 +317,19 @@ export async function passwordPage(req: Request, res: Response) {
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
 
-  const body = `<h1>Sign in</h1>
-  <p class="sub">Your email address or your member id, and your password.</p>
-  <div class="empty">${DENIED}</div>
-  <form class="card" method="post" action="/login">
-    <label for="identifier">Email or member id</label>
-    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
-    <label for="password">Password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
-    <div class="row"><button class="primary" type="submit">Sign in</button></div>
+  const body = `<h1>Your password</h1>
+  <p class="sub">Changing it signs out every other session, including one someone else is holding.</p>
+  ${err ? `<div class="empty">${esc(err)}</div>` : ''}
+  ${msg ? `<p class="meta">${esc(msg)}</p>` : ''}
+  <form class="card" method="post" action="/password">
+    <input type="hidden" name="csrf" value="${esc(csrfToken(s))}">
+    ${has ? `<label for="current">Current password</label>
+    <input id="current" type="password" name="current" size="34" autocomplete="current-password">` : ''}
+    <label for="password">New password</label>
+    <input id="password" type="password" name="password" size="34" autocomplete="new-password">
+    <label for="confirm">New password again</label>
+    <input id="confirm" type="password" name="confirm" size="34" autocomplete="new-password">
+    <div class="row"><button class="primary" type="submit">${has ? 'Change password' : 'Set password'}</button></div>
   </form>`;
   res.type('html').send(page('Your password', '/password', body, await ctxFor(req, scope)));
 }
@@ -402,16 +402,24 @@ export async function membersPage(req: Request, res: Response) {
 
   const rows = await Promise.all((await scope.rosterWithRoles())
     .map(async (m) => ({ ...m, cred: await creds.status(m.id) })));
-  const body = `<h1>Sign in</h1>
-  <p class="sub">Your email address or your member id, and your password.</p>
-  <div class="empty">${DENIED}</div>
-  <form class="card" method="post" action="/login">
-    <label for="identifier">Email or member id</label>
-    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
-    <label for="password">Password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
-    <div class="row"><button class="primary" type="submit">Sign in</button></div>
-  </form>`;
+  const body = `<h1>Members</h1>
+  <p class="sub">Who can sign in, and whether they have a credential yet. No hashes, no tokens.</p>
+  ${token ? `<div class="card"><p class="meta">Invite for ${esc(issuedFor)} — shown once, not stored, expires in
+      ${esc(String(Math.round(inviteTtlMs() / 3_600_000)))}h</p>
+      <p><code>/set-password?token=${esc(token)}</code></p></div>` : ''}
+  <div class="tablewrap"><table>
+    <tr><th>Member</th><th>Role</th><th>Status</th><th>Password</th><th>Locked</th>${mayInvite ? '<th></th>' : ''}</tr>
+    ${rows.map((m) => `<tr>
+      <td>${esc(m.name)}<br><span class="meta">${esc(m.id)}</span></td>
+      <td>${esc(m.role)}</td><td>${esc(m.status)}</td>
+      <td>${m.cred.has_password ? '<span class="pill ok">set</span>' : (m.cred.invite_outstanding ? '<span class="pill">invited</span>' : '<span class="pill">none</span>')}</td>
+      <td>${m.cred.locked_until && m.cred.locked_until > Date.now() ? '<span class="pill">locked</span>' : ''}</td>
+      ${mayInvite ? `<td><form method="post" action="/members/invite">
+        <input type="hidden" name="csrf" value="${esc(csrfToken(s))}">
+        <input type="hidden" name="memberId" value="${esc(m.id)}">
+        <button type="submit">Invite</button></form></td>` : ''}
+    </tr>`).join('')}
+  </table></div>`;
   res.type('html').send(page('Members', '/members', body, await ctxFor(req, scope)));
 }
 

@@ -14,7 +14,7 @@ import {
 import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
 import { cronDrain } from './routes/cron';
 import { page } from './views';
-import { configurePassport, oauthCallback, oauthError } from './routes/oauth';
+import { configurePassport, oauthCallback, oauthError, oauthStart } from './routes/oauth';
 import { connectPage, connectStart, connectCallback, disconnect, channelsPage, channelsSave } from './routes/connect';
 import passport from 'passport';
 import session from 'express-session';
@@ -97,8 +97,8 @@ export function createApp() {
 
   // everything below this line needs a session
   // OAuth routes (must be before requireSession)
-  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-  app.get('/auth/github', passport.authenticate('github', { scope: ['user:email'] }));
+  app.get('/auth/google', oauthStart('google'));
+  app.get('/auth/github', oauthStart('github'));
   app.get('/oauth/callback', oauthCallback);
   app.get('/oauth/error', oauthError);
 

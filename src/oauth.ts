@@ -18,22 +18,6 @@ export type OAuthInfo = {
   name: string | null;
 };
 
-/**
- * The member for an OAuth identity, created on first sign-in.
- *
- * New accounts are created as `viewer`. A viewer cannot confirm (ADR 0002 and
- * src/routes/confirm.ts enforce that), so signing in with Google never grants
- * the one privilege the product sells; an admin promotes deliberately.
- */
-export async function ensureMemberForOAuth(scope: WorkspaceScope, email: string | null, name: string | null): Promise<string> {
-  const memberId = email
-    ? `${email.toLowerCase().split('@')[0]}-${Buffer.from(email.toLowerCase()).toString('base64url').slice(0, 8)}`
-    : `oauth-${Math.random().toString(36).slice(2, 10)}`;
-  const existing = await scope.member(memberId);
-  if (!existing) await scope.addMember(memberId, name || email || 'OAuth User', 'viewer');
-  return memberId;
-}
-
 export async function linkOAuth(scope: WorkspaceScope, memberId: string, info: OAuthInfo): Promise<void> {
   await scope.linkOAuth(memberId, info);
 }

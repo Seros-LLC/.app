@@ -19,6 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { oauthStart } from '../src/routes/oauth';
 
 const ROOT = join(__dirname, '..');
 const TSC = join(ROOT, 'node_modules', '.bin', 'tsc');
@@ -60,4 +61,24 @@ main();
     require('node:fs').rmSync(tmp, { force: true });
   }
   assert.equal(failed, true, '.memberId should NOT typecheck on the joined row');
+});
+
+test('an unconfigured OAuth provider fails closed before Passport', () => {
+  const previousId = process.env.GOOGLE_CLIENT_ID;
+  const previousSecret = process.env.GOOGLE_CLIENT_SECRET;
+  delete process.env.GOOGLE_CLIENT_ID;
+  delete process.env.GOOGLE_CLIENT_SECRET;
+  let redirect: { code: number; url: string } | null = null;
+  const res: any = {
+    redirect: (code: number, url: string) => { redirect = { code, url }; return res; },
+  };
+  try {
+    oauthStart('google')({} as any, res, (() => {}) as any);
+    assert.deepEqual(redirect, { code: 303, url: '/login?err=google_not_configured' });
+  } finally {
+    if (previousId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+    else process.env.GOOGLE_CLIENT_ID = previousId;
+    if (previousSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+    else process.env.GOOGLE_CLIENT_SECRET = previousSecret;
+  }
 });

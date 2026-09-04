@@ -69,7 +69,7 @@ test('no source file carries a hard-coded secret fallback', () => {
   try {
     hits = execFileSync(
       'grep',
-      ['-rnE', "process\\.env\\.[A-Z_]*(SECRET|TOKEN|KEY|PASSWORD)[A-Za-z_]*\\s*\\|\\|\\s*'[^']+'", 'src/'],
+      ['-rnE', "process\\.env\\.[A-Z_]*(SECRET|TOKEN|KEY|PASSWORD)[A-Za-z_]*\\s*\\|\\|\\s*'[^']+'", 'src/', 'api/'],
       { cwd: root, encoding: 'utf8' },
     );
   } catch {

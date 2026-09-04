@@ -14,6 +14,7 @@ then write anything anywhere.
 ```bash
 npm install
 npm run migrate          # creates .seros/seros.db
+npm run seed             # creates demo members and prints generated passwords once
 npm start                # web app on http://localhost:3000
 npm run worker           # background worker, in a second terminal
 ```
@@ -29,6 +30,9 @@ queue. Confirm it and it shows up under Tasks with the confirmation behind it.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run eval` | scores detection against the golden set |
 | `npm run migrate` | applies `.seros/migrations/*.sql`, idempotent |
+| `npm run seed` | provisions demo members and prints any newly generated passwords once |
+| `npm run set-password -- <memberId>` | sets or generates a member password from a host shell |
+| `npm run invite -- <memberId>` | creates a single-use password setup link from a host shell |
 | `npm run check:tenancy` | fails if any module reaches past `WorkspaceScope` |
 | `npm run verify` | typecheck, tenancy check, and the full suite |
 
@@ -64,13 +68,14 @@ npm start
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | Postgres connection string | (uses SQLite if not postgres://) |
+| `DATABASE_URL` | Postgres connection string; required on Vercel | (uses SQLite locally if not postgres://) |
 | `SEROS_DB` | SQLite file path | `.seros/seros.db` |
 | `PGPOOL_MAX` | Max Postgres connections | `1` |
 | `PGPOOL_IDLE_MS` | Idle connection timeout | `10000` |
 | `PGPOOL_CONNECT_MS` | Connection timeout | `10000` |
 | `PGSCHEMA` | Postgres schema | `public` |
 | `SEROS_SESSION_SECRET` | Session signing key (min 16 chars) | **required** |
+| `SEROS_SIGNING_SECRET` | Slack request-signing secret (min 16 chars) | **required** |
 | `SEROS_DETECT_THRESHOLD` | Detection confidence threshold (0-100) | `55` |
 | `SEROS_TRACKER` | Which tracker receives confirmed tasks: `linear` or `fake` | `fake` |
 | `LINEAR_API_KEY` | Linear personal API key, required when `SEROS_TRACKER=linear` | — |

@@ -10,7 +10,6 @@ import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { startSession } from '../auth';
 import {
-  ensureMemberForOAuth,
   linkOAuth,
   findMemberByOAuth,
   findMemberByEmail,
@@ -38,40 +37,25 @@ export function configurePassport() {
       try {
         const workspaceId = WS();
         const db = openDb();
-        const ws = await WorkspaceScope.ensure(db, workspaceId);
+        const ws = await WorkspaceScope.open(db, workspaceId);
 
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || email || 'Google User';
 
-        let memberId: string;
-        let isNewMember = false;
+        let memberId: string | null = null;
 
         // Try to find existing member by provider
         const existing = await findMemberByOAuth(ws, 'google', profile.id);
         if (existing) {
           memberId = existing.memberId;
-        } else {
-          // Try to find by email in case they signed up with another provider
-          if (email) {
-            const byEmail = await findMemberByEmail(ws, email);
-            if (byEmail) {
-              memberId = byEmail.memberId;
-            } else {
-              // Check if they have a password-based account
-              const memberByEmail = await ws.memberByEmail(email);
-              if (memberByEmail) {
-                memberId = memberByEmail.members.id;
-              } else {
-                // Create new member
-                memberId = await ensureMemberForOAuth(ws, email, name);
-                isNewMember = true;
-              }
-            }
-          } else {
-            memberId = await ensureMemberForOAuth(ws, email, name);
-            isNewMember = true;
-          }
+        } else if (email) {
+          // OAuth is a sign-in method, not an anonymous signup path. It may link
+          // only to a member an admin has already provisioned in this workspace.
+          const byEmail = await findMemberByEmail(ws, email);
+          memberId = byEmail?.memberId ?? (await ws.memberByEmail(email))?.members.id ?? null;
         }
+        const member = memberId ? await ws.member(memberId) : undefined;
+        if (!memberId || !member || member.status !== 'active') return done(null, false);
 
         // Link the OAuth provider
         await linkOAuth(ws, memberId, {
@@ -83,7 +67,7 @@ export function configurePassport() {
 
         // Audit the OAuth login
         await ws.audit(
-          isNewMember ? 'session.oauth.created' : 'session.oauth.login',
+          'session.oauth.login',
           'ok',
           { member_id: memberId, provider: 'google', provider_user_id: profile.id },
           { actorType: 'member', actorId: memberId, objectType: 'member', objectId: memberId }
@@ -108,40 +92,23 @@ export function configurePassport() {
       try {
         const workspaceId = WS();
         const db = openDb();
-        const ws = await WorkspaceScope.ensure(db, workspaceId);
+        const ws = await WorkspaceScope.open(db, workspaceId);
 
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || profile.username || email || 'GitHub User';
 
-        let memberId: string;
-        let isNewMember = false;
+        let memberId: string | null = null;
 
         // Try to find existing member by provider
         const existing = await findMemberByOAuth(ws, 'github', profile.id);
         if (existing) {
           memberId = existing.memberId;
-        } else {
-          // Try to find by email in case they signed up with another provider
-          if (email) {
-            const byEmail = await findMemberByEmail(ws, email);
-            if (byEmail) {
-              memberId = byEmail.memberId;
-            } else {
-              // Check if they have a password-based account
-              const memberByEmail = await ws.memberByEmail(email);
-              if (memberByEmail) {
-                memberId = memberByEmail.members.id;
-              } else {
-                // Create new member
-                memberId = await ensureMemberForOAuth(ws, email, name);
-                isNewMember = true;
-              }
-            }
-          } else {
-            memberId = await ensureMemberForOAuth(ws, email, name);
-            isNewMember = true;
-          }
+        } else if (email) {
+          const byEmail = await findMemberByEmail(ws, email);
+          memberId = byEmail?.memberId ?? (await ws.memberByEmail(email))?.members.id ?? null;
         }
+        const member = memberId ? await ws.member(memberId) : undefined;
+        if (!memberId || !member || member.status !== 'active') return done(null, false);
 
         // Link the OAuth provider
         await linkOAuth(ws, memberId, {
@@ -153,7 +120,7 @@ export function configurePassport() {
 
         // Audit the OAuth login
         await ws.audit(
-          isNewMember ? 'session.oauth.created' : 'session.oauth.login',
+          'session.oauth.login',
           'ok',
           { member_id: memberId, provider: 'github', provider_user_id: profile.id },
           { actorType: 'member', actorId: memberId, objectType: 'member', objectId: memberId }
@@ -165,6 +132,17 @@ export function configurePassport() {
       }
     }));
   }
+}
+
+export function oauthStart(provider: 'google' | 'github') {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const prefix = provider === 'google' ? 'GOOGLE' : 'GITHUB';
+    if (!process.env[`${prefix}_CLIENT_ID`] || !process.env[`${prefix}_CLIENT_SECRET`]) {
+      return res.redirect(303, `/login?err=${provider}_not_configured`);
+    }
+    const scope = provider === 'google' ? ['profile', 'email'] : ['user:email'];
+    return passport.authenticate(provider, { scope })(req, res, next);
+  };
 }
 
 /**
