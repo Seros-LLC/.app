@@ -8,7 +8,7 @@ import { generateCaptcha } from '../src/captcha';
 
 process.env.SEROS_SESSION_SECRET = 'test-session-secret-for-login-123456';
 
-test('loginPage renders form, CAPTCHA, and OAuth buttons', () => {
+test('loginPage renders form, CAPTCHA, and OAuth buttons', async () => {
   const app = createApp();
   // Express response mock
   let html = '';
@@ -18,7 +18,7 @@ test('loginPage renders form, CAPTCHA, and OAuth buttons', () => {
   };
 
   const { loginPage } = require('../src/routes/login');
-  loginPage({ query: {} } as any, res);
+  await loginPage({ query: {} } as any, res);
 
   assert.ok(html.includes('Sign in'));
   assert.ok(html.includes('captchaAnswer'));

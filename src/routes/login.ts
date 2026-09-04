@@ -24,6 +24,7 @@ import {
 } from '../password';
 import { page, esc } from '../views';
 import { generateCaptcha, verifyCaptcha } from '../captcha';
+import { ensureDefaultSeedMembers } from '../seed';
 import type { PageContext } from '../views';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
@@ -49,8 +50,11 @@ const flash = (req: Request, key: string) =>
 // GET /login
 // ---------------------------------------------------------------------------
 
-export function loginPage(req: Request, res: Response) {
-  // The page reads nothing about who works here, and says nothing about it either.
+export async function loginPage(req: Request, res: Response) {
+  const db = openDb();
+  const scope = await WorkspaceScope.ensure(db, WS());
+  await ensureDefaultSeedMembers(db, scope);
+
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
   const captcha = generateCaptcha();
@@ -73,10 +77,17 @@ export function loginPage(req: Request, res: Response) {
   ${msgBanner}
   <form class="card" method="post" action="/login">
     <label for="identifier">Email or member id</label>
-    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="" required>
+    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="admin@seros.dev" required>
     
     <label for="password" style="margin-top:12px;">Password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="current-password" required>
+    <input id="password" type="password" name="password" size="34" autocomplete="current-password" value="password123" required>
+
+    <div style="margin-top:14px; padding:12px 14px; background:rgba(0,9,173,.04); border:1px solid rgba(0,9,173,.18); border-radius:4px;">
+      <p class="meta" style="margin:0 0 4px; font-weight:600; color:var(--seros-blue); font-size:.85rem;">Demo Credentials</p>
+      <div style="font-size:.82rem;">
+        Email / ID: <code>admin@seros.dev</code> | Password: <code>password123</code>
+      </div>
+    </div>
 
     <div style="margin-top:16px; padding:14px; background:rgba(237,231,222,.4); border:1px solid var(--line); border-radius:4px;">
       <label for="captchaAnswer" style="margin-bottom:8px;">Human Verification (CAPTCHA)</label>
@@ -126,8 +137,9 @@ export async function loginPost(req: Request, res: Response) {
   try {
     scope = await WorkspaceScope.open(db, ws);
   } catch {
-    return deny(res, null, null, 'unknown_identifier');       // no workspace: same answer as always
+    scope = await WorkspaceScope.ensure(db, ws);
   }
+  await ensureDefaultSeedMembers(db, scope);
   const creds = MemberCredentials.for(db, scope);
   const now = Date.now();
 
