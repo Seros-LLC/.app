@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { oauthStart } from '../src/routes/oauth';
+import { oauthCallback, oauthStart } from '../src/routes/oauth';
 
 const ROOT = join(__dirname, '..');
 const TSC = join(ROOT, 'node_modules', '.bin', 'tsc');
@@ -82,3 +82,48 @@ test('an unconfigured OAuth provider fails closed before Passport', () => {
     else process.env.GOOGLE_CLIENT_SECRET = previousSecret;
   }
 });
+
+test('OAuth callback without a provider fails closed before Passport', async () => {
+  let redirect: { code: number; url: string } | null = null;
+  const res: any = {
+    redirect: (code: number, url: string) => { redirect = { code, url }; return res; },
+  };
+
+  await oauthCallback(
+    { query: {}, path: '/oauth/callback' } as any,
+    res,
+    (() => { throw new Error('next must not be called'); }) as any,
+  );
+
+  assert.deepEqual(redirect, { code: 303, url: '/login?err=oauth_failed' });
+});
+
+for (const provider of ['google', 'github'] as const) {
+  test(`unconfigured ${provider} callback fails closed before Passport`, async () => {
+    const prefix = provider.toUpperCase();
+    const idName = `${prefix}_CLIENT_ID`;
+    const secretName = `${prefix}_CLIENT_SECRET`;
+    const previousId = process.env[idName];
+    const previousSecret = process.env[secretName];
+    delete process.env[idName];
+    delete process.env[secretName];
+    let redirect: { code: number; url: string } | null = null;
+    const res: any = {
+      redirect: (code: number, url: string) => { redirect = { code, url }; return res; },
+    };
+
+    try {
+      await oauthCallback(
+        { query: { provider }, path: '/oauth/callback' } as any,
+        res,
+        (() => { throw new Error('next must not be called'); }) as any,
+      );
+      assert.deepEqual(redirect, { code: 303, url: `/login?err=${provider}_not_configured` });
+    } finally {
+      if (previousId === undefined) delete process.env[idName];
+      else process.env[idName] = previousId;
+      if (previousSecret === undefined) delete process.env[secretName];
+      else process.env[secretName] = previousSecret;
+    }
+  });
+}

@@ -149,9 +149,19 @@ export function oauthStart(provider: 'google' | 'github') {
  * OAuth callback handler - Passport authenticates the user, we log them in
  */
 export async function oauthCallback(req: any, res: Response, next: NextFunction) {
-  const provider = (req.query.provider as string) || (req.path.includes('google') ? 'google' : 'github');
-  if (!provider || !['google', 'github'].includes(provider)) {
+  const provider = (req.query.provider as string)
+    || (req.path.includes('google') ? 'google' : req.path.includes('github') ? 'github' : '');
+  if (!['google', 'github'].includes(provider)) {
     return res.redirect(303, '/login?err=oauth_failed');
+  }
+
+  // A callback can be requested directly, including after credentials have been
+  // removed. Do not ask Passport for a strategy that configurePassport() never
+  // registered: Passport throws for an unknown strategy, turning a harmless GET
+  // into a 500. Match oauthStart() and fail closed at the login page instead.
+  const prefix = provider === 'google' ? 'GOOGLE' : 'GITHUB';
+  if (!process.env[`${prefix}_CLIENT_ID`] || !process.env[`${prefix}_CLIENT_SECRET`]) {
+    return res.redirect(303, `/login?err=${provider}_not_configured`);
   }
 
   passport.authenticate(provider, (err: any, user: any) => {
