@@ -39,7 +39,7 @@ const PG_MIGRATIONS = join(SQLITE_MIGRATIONS, "pg");
 /** An advisory lock id, so two booting instances cannot migrate at once. */
 const PG_MIGRATION_LOCK = BigInt("8154193027111001");
 
-const dbFile = () => process.env.SEROS_DB || join(__dirname, "..", "..", ".seros", "seros.db");
+const dbFile = () => process.env.SEROS_DB || (process.env.VERCEL ? "/tmp/seros.db" : join(__dirname, "..", "..", ".seros", "seros.db"));
 
 /**
  * How many rows a write touched, on either driver. better-sqlite3 answers with
