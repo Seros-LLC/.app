@@ -23,12 +23,16 @@ const WS = () => process.env.SEROS_WORKSPACE || 'demo';
  * Configure Passport strategies for Google and GitHub OAuth.
  */
 export function configurePassport() {
+  const publicUrl = process.env.SEROS_PUBLIC_URL || '';
+  const googleCallback = publicUrl ? `${publicUrl.replace(/\/$/, '')}/oauth/callback?provider=google` : '/oauth/callback?provider=google';
+  const githubCallback = publicUrl ? `${publicUrl.replace(/\/$/, '')}/oauth/callback?provider=github` : '/oauth/callback?provider=github';
+
   // Google OAuth
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     passport.use('google', new GoogleStrategy({
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: '/oauth/callback',
+      callbackURL: googleCallback,
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
@@ -97,7 +101,7 @@ export function configurePassport() {
     passport.use('github', new GitHubStrategy({
       clientID: process.env.GITHUB_CLIENT_ID,
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
-      callbackURL: '/oauth/callback',
+      callbackURL: githubCallback,
       scope: ['user:email'],
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
@@ -167,7 +171,10 @@ export function configurePassport() {
  * OAuth callback handler - Passport authenticates the user, we log them in
  */
 export async function oauthCallback(req: any, res: Response, next: NextFunction) {
-  const provider = req.query.provider as string;
+  const provider = (req.query.provider as string) || (req.path.includes('google') ? 'google' : 'github');
+  if (!provider || !['google', 'github'].includes(provider)) {
+    return res.redirect(303, '/login?err=oauth_failed');
+  }
 
   passport.authenticate(provider, (err: any, user: any) => {
     if (err || !user) {

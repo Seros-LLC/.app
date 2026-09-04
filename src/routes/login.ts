@@ -23,6 +23,7 @@ import {
   passwordMinLength, newInviteToken, normaliseEmail, lockoutPolicy, inviteTtlMs,
 } from '../password';
 import { page, esc } from '../views';
+import { generateCaptcha, verifyCaptcha } from '../captcha';
 import type { PageContext } from '../views';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
@@ -52,20 +53,56 @@ export function loginPage(req: Request, res: Response) {
   // The page reads nothing about who works here, and says nothing about it either.
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
+  const captcha = generateCaptcha();
+
+  const errBanner = err === 'captcha_failed'
+    ? '<div class="empty" style="border-color:var(--danger);color:var(--danger);margin-bottom:18px;">CAPTCHA verification failed or expired. Please solve the new challenge below.</div>'
+    : err === 'google_not_configured'
+    ? '<div class="empty" style="border-color:var(--warning);color:var(--warning);margin-bottom:18px;">Google Sign In is not configured in this environment. (Missing GOOGLE_CLIENT_ID)</div>'
+    : err === 'github_not_configured'
+    ? '<div class="empty" style="border-color:var(--warning);color:var(--warning);margin-bottom:18px;">GitHub Sign In is not configured in this environment. (Missing GITHUB_CLIENT_ID)</div>'
+    : err
+    ? `<div class="empty" style="border-color:var(--danger);color:var(--danger);margin-bottom:18px;">${DENIED}</div>`
+    : '';
+
+  const msgBanner = msg ? `<div class="flashbar" style="margin-bottom:18px;"><div class="wrap"><p class="flash">${esc(msg)}</p></div></div>` : '';
 
   const body = `<h1>Sign in</h1>
-  <p class="sub">Your email address or your member id, and your password.</p>
-  <div class="empty">${DENIED}</div>
+  <p class="sub">Your email address or member ID, password, and human verification.</p>
+  ${errBanner}
+  ${msgBanner}
   <form class="card" method="post" action="/login">
     <label for="identifier">Email or member id</label>
-    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="">
-    <label for="password">Password</label>
-    <input id="password" type="password" name="password" size="34" autocomplete="current-password">
-    <div class="row"><button class="primary" type="submit">Sign in</button></div>
+    <input id="identifier" type="text" name="identifier" size="34" autocomplete="username" value="" required>
+    
+    <label for="password" style="margin-top:12px;">Password</label>
+    <input id="password" type="password" name="password" size="34" autocomplete="current-password" required>
+
+    <div style="margin-top:16px; padding:14px; background:rgba(237,231,222,.4); border:1px solid var(--line); border-radius:4px;">
+      <label for="captchaAnswer" style="margin-bottom:8px;">Human Verification (CAPTCHA)</label>
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        ${captcha.svg}
+        <input id="captchaAnswer" type="text" name="captchaAnswer" size="8" placeholder="Answer" required autocomplete="off" style="width:110px; font-weight:bold;">
+      </div>
+      <input type="hidden" name="captchaSig" value="${esc(captcha.sig)}">
+      <input type="hidden" name="captchaTs" value="${captcha.ts}">
+    </div>
+
+    <div class="row" style="margin-top:20px;"><button class="primary" type="submit">Sign in &rarr;</button></div>
   </form>
-  <div class="oauth-buttons">
-    ${process.env.GOOGLE_CLIENT_ID ? `<a href="/auth/google" class="oauth-btn google-btn">Sign in with Google</a>` : ''}
-    ${process.env.GITHUB_CLIENT_ID ? `<a href="/auth/github" class="oauth-btn github-btn">Sign in with GitHub</a>` : ''}
+
+  <div style="margin-top:24px;">
+    <p class="meta" style="margin-bottom:10px; text-transform:uppercase; letter-spacing:.08em;">Or sign in with Single Sign-On</p>
+    <div class="oauth-buttons">
+      <a href="/auth/google" class="oauth-btn google-btn">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
+        Sign in with Google
+      </a>
+      <a href="/auth/github" class="oauth-btn github-btn">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Sign in with GitHub
+      </a>
+    </div>
   </div>`;
   res.type('html').send(page('Sign in', '/login', body));
 }
@@ -75,6 +112,14 @@ export function loginPage(req: Request, res: Response) {
 // ---------------------------------------------------------------------------
 
 export async function loginPost(req: Request, res: Response) {
+  const captchaAnswer = String(req.body?.captchaAnswer ?? '');
+  const captchaSig = String(req.body?.captchaSig ?? '');
+  const captchaTs = Number(req.body?.captchaTs ?? 0);
+
+  if (!verifyCaptcha(captchaAnswer, captchaSig, captchaTs)) {
+    return res.redirect(303, '/login?err=captcha_failed');
+  }
+
   const db = openDb();
   const ws = WS();
   let scope: WorkspaceScope;
