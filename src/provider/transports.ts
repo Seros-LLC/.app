@@ -157,7 +157,9 @@ async function callOpenAiCompatible(req: CompleteRequest, model: string, base: s
       }),
     });
     if (!r.ok) { const e: any = new Error(`hosted http ${r.status}`); e.kind = 'provider_error'; throw e; }
-    const j: any = await r.json();
+    const raw = await readBounded(r, MAX_RESPONSE_BYTES());
+    let j: any;
+    try { j = JSON.parse(raw); } catch { const e: any = new Error('hosted envelope was not json'); e.kind = 'provider_error'; throw e; }
     const text = j?.choices?.[0]?.message?.content;
     if (typeof text !== 'string') { const e: any = new Error('hosted returned no content'); e.kind = 'provider_error'; throw e; }
     return {

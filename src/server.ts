@@ -1,4 +1,5 @@
 import express from 'express';
+import { join } from 'node:path';
 import { migrateDbAsync, openDb } from './db/client';
 import { webhookHandler, secret } from './routes/webhook';
 import { queuePage, tasksPage, auditPage } from './routes/queue';
@@ -51,7 +52,13 @@ export function createApp() {
   // Passport's session() needs a real req.session to deserialize into; the app's
   // own signed-cookie session (src/auth.ts) is separate and lives below OAuth.
   app.use(session({
-    secret: process.env.SEROS_SESSION_SECRET || 'seros-passport-bridge-secret',
+    // sessionSecret() throws when SEROS_SESSION_SECRET is unset or under 16 chars,
+    // which is the point. This used to fall back to a hard-coded literal, so an
+    // unset env var in production left every session cookie signed with a string
+    // committed to this repo: anyone reading it could mint a valid session for any
+    // workspace. The app's own cookie (src/auth.ts) already failed closed here and
+    // the webhook secret does too — this bridge was the one that did not.
+    secret: sessionSecret(),
     resave: false,
     saveUninitialized: false,
     cookie: { httpOnly: true, sameSite: 'strict', secure: 'auto' },
@@ -67,6 +74,7 @@ export function createApp() {
     webhookHandler);
 
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
+  app.use(express.static(join(__dirname, '../public')));
   app.use((_req, res, next) => {
     res.setHeader('Content-Security-Policy',
       "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");

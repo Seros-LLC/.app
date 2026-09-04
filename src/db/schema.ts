@@ -4,6 +4,16 @@
 import { sqliteTable, text, integer, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';   // M11: database-side default for audit request ids
 
+// Declared here because this module is a leaf — it imports only drizzle — so both
+// db/scope.ts (which stamps a deadline onto every new draft) and limits.ts (which
+// sweeps expired ones) can share these without an import cycle. limits.ts imports
+// WorkspaceScope from scope.ts, so the constants cannot live there.
+export const DAY_MS = 86_400_000;
+// The brief (§6, Q14) deliberately leaves the draft lifetime open. Fourteen days is
+// the answer: long enough to survive a fortnight's holiday, short enough that
+// unreviewed customer content does not sit in the database indefinitely.
+export const DEFAULT_DRAFT_TTL_DAYS = 14;
+
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -79,8 +89,12 @@ export const drafts = sqliteTable('drafts', {
   state: text('state', { enum:['pending','confirmed','rejected','expired','superseded'] }).notNull().default('pending'),
   provider: text('provider'),
   createdAt: integer('created_at').notNull(),
+  // When this draft stops being actionable. NULLABLE on purpose: rows written before
+  // the column existed have no deadline, and the sweeper falls back to
+  // created_at + TTL for them rather than treating NULL as "never expires".
+  expiresAt: integer('expires_at'),
 }, (t)=>[
-  primaryKey({columns:[t.workspaceId,t.id]})
+  primaryKey({columns:[t.workspaceId,t.id]}),
 ]);
 
 // The model-written "why this was read as a commitment", one row per draft
@@ -113,6 +127,26 @@ export const confirmations = sqliteTable('confirmations', {
   uniqueIndex('uniq_confirm_draft').on(t.workspaceId,t.draftId)
 ]);
 
+// What the human changed at confirm time (0012_confirmation_edits).
+//
+// The draft row is what the MODEL proposed and is immutable after drafting;
+// this is what the HUMAN agreed to. Keeping them apart is the whole point:
+// overwriting the draft made "model was right" and "model was wrong and the
+// human rewrote it" indistinguishable, and acceptance rate uncomputable.
+// A NULL field here means the human did not change that field.
+export const confirmationEdits = sqliteTable('confirmation_edits', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  confirmationId: text('confirmation_id').notNull(),
+  editedFields: text('edited_fields').notNull(),  // 'title,owner' — names only
+  title: text('title'),
+  outcome: text('outcome'),
+  owner: text('owner'),
+  dueDate: text('due_date'),
+  createdAt: integer('created_at').notNull(),
+}, (t)=>[
+  primaryKey({columns:[t.workspaceId,t.confirmationId]})
+]);
+
 export const tasks = sqliteTable('tasks', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
   id: text('id').notNull(),
@@ -123,7 +157,11 @@ export const tasks = sqliteTable('tasks', {
   createdAt: integer('created_at').notNull(),
 }, (t)=>[
   primaryKey({columns:[t.workspaceId,t.id]}),
-  uniqueIndex('uniq_confirm_task').on(t.workspaceId,t.confirmationId)
+  uniqueIndex('uniq_confirm_task').on(t.workspaceId,t.confirmationId),
+  // Declared here to match what 0004_hardening.sql actually created (M9); the
+  // name must be that migration's, or drizzle would propose a second identical
+  // index alongside it.
+  uniqueIndex('tasks_idempotency_key').on(t.workspaceId,t.idempotencyKey)
 ]);
 
 // The Slack connection and the channels the admin chose (0011_source_connections).

@@ -11,3 +11,8 @@ server.log
 .vercel
 .env*
 .env.local
+
+# stray editor/agent backups — never tracked again
+*.bak
+*.backup
+*.backup[0-9]

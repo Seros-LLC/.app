@@ -1,0 +1,16 @@
+-- migrations/pg/0013_draft_expires_at.sql
+-- Per-draft expiry deadline (REVIEW.md M7, brief §1.5).
+--
+-- Drafts hold customer content — a title is the customer's own words — and until
+-- now nothing gave an unreviewed one an end date. Anything nobody clicked simply
+-- accumulated, which quietly contradicts the retention promise the website makes.
+--
+-- NULLABLE because rows written before this column existed have no deadline. The
+-- sweeper in src/limits.ts reads COALESCE(expires_at, created_at + ttl), so a NULL
+-- means "fall back to the default lifetime", never "keeps forever".
+--
+-- IF NOT EXISTS because src/db/driver.ts re-runs every migration on every boot and
+-- a failing file throws. Postgres supports the clause; SQLite does not, which is
+-- why the SQLite side adds this column at runtime instead — see
+-- ensureDraftExpirySchema() in src/limits.ts.
+ALTER TABLE drafts ADD COLUMN IF NOT EXISTS expires_at BIGINT;

@@ -455,6 +455,9 @@ but the guarantee is convention, not construction — and invariant 20 plus the 
 modules, and add the lint/static check the brief requires.
 
 ## M6 — Confirming with edits destroys the model's suggestion and records no `edited_fields`
+**FIXED c46cf9b.** Draft is immutable after drafting; the human's values go to the
+`confirmation_edits` sidecar, written in the confirm transaction. Readers coalesce edit over
+draft (`writeJob().agreed`, worker, `taskRows`). Covered by `tests/confirmation-edits.test.ts`.
 `src/db/scope.ts:143-149`, `src/db/schema.ts:57-68`
 
 Edits are applied with `UPDATE drafts SET title=…, outcome=…` in place, and the `confirmations` table
@@ -469,6 +472,13 @@ asset, and the acceptance-rate and owner-accuracy metrics become uncomputable.
 final values there, and leave the draft row as the model wrote it.
 
 ## M7 — Drafts never expire
+**FIXED.** `drafts.expires_at` now exists and `createDraft()` stamps created_at + 14 days
+(brief §6 Q14 left the lifetime open; 14 days is the decision, overridable per draft and via
+`SEROS_DRAFT_TTL_DAYS`). The sweep machinery in limits.ts was already built and wired into
+`runMaintenance()` — only the column was missing, and its `COALESCE(expires_at, created_at + ttl)`
+branch activates now that it exists. SQLite gets the column from a guarded ALTER in
+`migrateSqlite()` (no `ADD COLUMN IF NOT EXISTS` in SQLite, and migrations re-run every boot);
+Postgres from `migrations/pg/0013_draft_expires_at.sql`. Covered by tests/draft-expiry.test.ts.
 `src/db/schema.ts:39-55` (no `expires_at`), `src/db/scope.ts:127`
 
 The brief makes `expires_at` a required column with an `expired` terminal state; the app has the enum
@@ -493,6 +503,9 @@ published retention promise is unimplemented.
 window or does not run.
 
 ## M9 — `tasks.idempotency_key` is not unique
+**ALREADY FIXED (finding was stale).** `0004_hardening.sql` created the unique index
+`tasks_idempotency_key (workspace_id, idempotency_key)`. Only `schema.ts` failed to declare it,
+which would have let drizzle propose a duplicate; declared as of c46cf9b.
 `src/db/schema.ts:76`, migration `tasks`
 
 Brief 1.7 requires `idempotency_key text req **unique**`. Only `(workspace_id, confirmation_id)` is
@@ -543,6 +556,9 @@ floor off with no error, degrading toward more suggestions rather than fewer.
 **Fix:** parse once at startup, validate `Number.isFinite` and the 0-100 range, and throw otherwise.
 
 ## M14 — The eval harness prints corpus message text to stdout, and the golden set is far below the required size and lives in this repo
+**RESOLVED (in-repo).** Message text is gated behind `SEROS_EVAL_SHOW_TEXT=1` (defaults to off/counts only).
+Corpus size is 217 examples (96 positive), exceeding the >=200 brief threshold. A consented real-world
+corpus in a separate restricted repository remains an organizational task for when partner data is gathered.
 `evals/detection.ts:20,29-30,52`, `evals/golden.json`
 
 Every false positive and false negative is printed verbatim:

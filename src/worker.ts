@@ -106,10 +106,12 @@ async function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: st
       taskId: job.task.id,
       confirmationId,
       idempotencyKey: job.task.idempotencyKey,
-      title: job.draft?.title ?? '(untitled)',
-      outcome: job.draft?.outcome ?? '',
-      owner: job.draft?.suggestedOwner ?? null,
-      dueDate: job.draft?.suggestedDueDate ?? null,
+      // `agreed` is the draft with the human's confirm-time edits applied. The
+      // tracker gets what the human agreed to, never the model's superseded words.
+      title: job.agreed?.title ?? '(untitled)',
+      outcome: job.agreed?.outcome ?? '',
+      owner: job.agreed?.owner ?? null,
+      dueDate: job.agreed?.dueDate ?? null,
       sourcePermalink: null,
       context: null,
       labels: [],
@@ -128,7 +130,7 @@ async function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: st
     { task_id: job.task.id, confirmation_id: confirmationId, idempotency_key: job.task.idempotencyKey,
       tracker: result.tracker, external_id: result.externalId, deduped: result.deduped === true ? 1 : 0 });
   console.log(JSON.stringify({ level: 'info', event: 'tracker.write', task_id: job.task.id,
-    tracker: result.tracker, external_id: result.externalId, title_len: (job.draft?.title ?? '').length }));
+    tracker: result.tracker, external_id: result.externalId, title_len: (job.agreed?.title ?? '').length }));
 }
 
 export async function tick(db: ReturnType<typeof openDb>): Promise<boolean> {

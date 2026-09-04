@@ -202,6 +202,18 @@ function migrateSqlite(dbPath: string): string[] {
   raw.pragma("foreign_keys = ON");
   const files = migrationFiles("sqlite");
   for (const f of files) raw.exec(readFileSync(join(SQLITE_MIGRATIONS, f), "utf-8"));
+
+  // drafts.expires_at (REVIEW.md M7, brief §1.5) is added here rather than in a
+  // migration file because SQLite has no `ADD COLUMN IF NOT EXISTS`, and the loop
+  // above re-runs every file on every boot with no tracking table — so a bare ALTER
+  // in a .sql file succeeds once and then crashes the app on its second start.
+  // Guarding on the catalogue is idempotent by construction. Postgres does have the
+  // clause and gets a normal migration: migrations/pg/0013_draft_expires_at.sql.
+  const draftCols = raw.prepare("PRAGMA table_info(drafts)").all() as { name: string }[];
+  if (!draftCols.some((c) => c.name === "expires_at")) {
+    raw.exec("ALTER TABLE drafts ADD COLUMN expires_at INTEGER");
+  }
+
   raw.close();
   return files;
 }
