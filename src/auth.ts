@@ -20,7 +20,7 @@ import { openDb } from './db/client';
 import { MemberCredentials } from './password';
 
 export const sessionSecret = () => {
-  const s = process.env.SEROS_SESSION_SECRET || (process.env.VERCEL ? 'seros-vercel-session-secret-fallback-key-32b' : '');
+  const s = process.env.SEROS_SESSION_SECRET;
   if (!s || s.length < 16) throw new Error('SEROS_SESSION_SECRET is unset or too short (>=16 chars required)');
   return s;
 };

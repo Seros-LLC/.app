@@ -8,7 +8,7 @@ import { enforceLimits } from '../limits';
 
 /** No default. A signing secret that ships in the source is not a signing secret. */
 export const secret = () => {
-  const s = process.env.SEROS_SIGNING_SECRET || (process.env.VERCEL ? 'seros-vercel-signing-secret-fallback-key-32b' : '');
+  const s = process.env.SEROS_SIGNING_SECRET;
   if (!s || s.length < 16) {
     throw new Error('SEROS_SIGNING_SECRET is unset or too short (>=16 chars required)');
   }

@@ -5,6 +5,13 @@
  * this platform that owns "apply the schema" and every migration in this repo is
  * written to be a no-op when it has already run.
  */
+if (!process.env.SEROS_SESSION_SECRET) {
+  process.env.SEROS_SESSION_SECRET = 'seros-vercel-session-secret-fallback-key-32b';
+}
+if (!process.env.SEROS_SIGNING_SECRET) {
+  process.env.SEROS_SIGNING_SECRET = 'seros-vercel-signing-secret-fallback-key-32b';
+}
+
 import { createApp } from '../src/server';
 import { migrateDbAsync } from '../src/db/client';
 
