@@ -23,6 +23,14 @@ import { WorkspaceScope } from './db/scope';
 
 const PORT = Number(process.env.PORT || 3000);
 
+// OAuth's authorization response returns from accounts.google.com by a top-level GET.
+// Lax preserves Passport's state cookie for that callback; Strict would silently drop it.
+export const oauthSessionCookie = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: 'auto' as const,
+};
+
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
@@ -61,7 +69,7 @@ export function createApp() {
     secret: sessionSecret(),
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'strict', secure: 'auto' },
+    cookie: oauthSessionCookie,
   }));
   app.use(passport.session());
 
