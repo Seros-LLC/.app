@@ -141,7 +141,9 @@ export function oauthStart(provider: 'google' | 'github') {
       return res.redirect(303, `/login?err=${provider}_not_configured`);
     }
     const scope = provider === 'google' ? ['profile', 'email'] : ['user:email'];
-    return passport.authenticate(provider, { scope })(req, res, next);
+    // The callback creates a session. Require Passport's signed OAuth state value
+    // so a cross-site request cannot bind an attacker's provider account to it.
+    return passport.authenticate(provider, { scope, state: true })(req, res, next);
   };
 }
 
