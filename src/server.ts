@@ -4,7 +4,6 @@ import { migrateDbAsync, openDb } from './db/client';
 import { webhookHandler, secret } from './routes/webhook';
 import { queuePage, tasksPage, auditPage } from './routes/queue';
 import { confirmHandler } from './routes/confirm';
-import { demoPage, demoPost } from './routes/demo';
 import { askPage, askPost } from './routes/ask';
 import { digestPage } from './routes/digest';
 import {
@@ -127,9 +126,7 @@ export function createApp() {
   app.get('/ask', askPage);
   app.post('/ask', rateLimit('ask', 30, 60_000), requireCsrf, askPost);   // not a write, but it spends
   app.get('/digest', rateLimit('digest', 60, 60_000), digestPage);
-  app.get('/demo', demoPage);
   app.post('/confirm', rateLimit('confirm', 120, 60_000), requireCsrf, confirmHandler);
-  app.post('/demo', rateLimit('demo', 60, 60_000), requireCsrf, demoPost);
   app.get('/', (_req, res) => res.redirect(302, '/queue'));
 
   app.use((_req, res) => res.status(404).type('html')

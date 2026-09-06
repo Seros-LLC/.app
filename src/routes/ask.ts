@@ -93,7 +93,7 @@ function render(result: AskResult, token: string): string {
     <div class="card">
       <h3>Nothing to answer from</h3>
       <p class="sub">This workspace has no drafts and no tasks yet, so the question was not sent to a
-      model and nothing was spent. Post a message on the <a href="/demo">demo page</a> first.</p>
+      model and nothing was spent. Connect Slack and select channels first.</p>
     </div>`;
   }
 

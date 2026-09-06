@@ -197,7 +197,6 @@ const NAV: [string, string][] = [
   ['/connect', 'Slack'],
   ['/members', 'Members'],
   ['/audit', 'Audit'],
-  ['/demo', 'Demo'],
 ];
 
 export function page(title: string, active: string, body: string, ctx: PageContext = {}): string {

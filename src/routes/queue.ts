@@ -32,7 +32,7 @@ export async function queuePage(req: Request, res: Response) {
   const body = `
   <h1>Confirm queue</h1>
   <p class="sub">${rows.length} draft${rows.length === 1 ? '' : 's'} waiting. Nothing is written to a tracker until you confirm it.</p>
-  ${rows.length === 0 ? `<div class="empty">The queue is empty. Post a message on the <a href="/demo">demo page</a> to create one.</div>` : ''}
+  ${rows.length === 0 ? `<div class="empty">The queue is empty. Connect Slack and select channels to receive reviewed drafts.</div>` : ''}
   ${rows.map((d) => `
     <form class="card" method="post" action="/confirm">
       <input type="hidden" name="draftId" value="${esc(d.id)}">
