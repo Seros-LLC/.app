@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false
+  },
+  "include": [
+    "api/**/*.ts",
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "tests/**",
+    "evals/**",
+    "spikes/**",
+    "dist/**"
+  ]
+}
