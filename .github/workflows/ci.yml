@@ -1,0 +1,57 @@
+name: app checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tenancy check
+        run: npm run check:tenancy
+
+      - name: Tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build:vercel
+
+      - name: Audit (high severity)
+        run: npm audit --audit-level=high
+
+      - name: No committed build output or local database
+        run: |
+          fail=0
+          if git ls-files --error-unmatch dist >/dev/null 2>&1; then
+            echo "::error::dist/ is committed; it must stay build-only"
+            fail=1
+          fi
+          for f in $(git ls-files '*.db' '*.sqlite' '*.sqlite3'); do
+            echo "::error file=$f::database file committed to the repo"
+            fail=1
+          done
+          exit $fail
+
+      - name: No obvious secrets committed
+        run: |
+          # tests/ is excluded: it uses obvious dummy tokens to prove secrets are sealed.
+          if git grep -nIE '(sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':!*.example' ':!tests' ':!.github/workflows/ci.yml'; then
+            echo "::error::possible secret committed"
+            exit 1
+          fi
