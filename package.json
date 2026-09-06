@@ -33,7 +33,6 @@
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "nodemon": "^3.1.14",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "passport-google-oauth20": "^2.0.0",
@@ -43,14 +42,7 @@
     "typescript": "^7.0.2",
     "zod": "^4.4.3"
   },
-  "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/express": "^5.0.6",
-    "@types/node": "^26.2.0",
-    "@types/passport": "^1.0.17",
-    "@types/passport-github2": "^1.2.9",
-    "@types/passport-google-oauth20": "^2.0.17"
-  },
+  "devDependencies": {},
   "engines": {
     "node": ">=18"
   }
