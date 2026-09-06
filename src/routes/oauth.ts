@@ -32,6 +32,9 @@ export function configurePassport() {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: googleCallback,
+      // State is configured on the strategy, not only at authenticate() time:
+      // otherwise passport-oauth2 installs a NullStore and sends no state value.
+      state: true,
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
@@ -143,7 +146,7 @@ export function oauthStart(provider: 'google' | 'github') {
     const scope = provider === 'google' ? ['profile', 'email'] : ['user:email'];
     // The callback creates a session. Require Passport's signed OAuth state value
     // so a cross-site request cannot bind an attacker's provider account to it.
-    return passport.authenticate(provider, { scope, state: true })(req, res, next);
+    return passport.authenticate(provider, { scope, state: {} })(req, res, next);
   };
 }
 

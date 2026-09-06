@@ -18,7 +18,7 @@ test('Google OAuth start enables state validation', () => {
 
   try {
     oauthStart('google')({} as any, {} as any, () => undefined);
-    assert.deepEqual(options, { scope: ['profile', 'email'], state: true });
+    assert.deepEqual(options, { scope: ['profile', 'email'], state: {} });
   } finally {
     (passport as any).authenticate = originalAuthenticate;
     if (oldId === undefined) delete process.env.GOOGLE_CLIENT_ID;
