@@ -142,8 +142,8 @@ export function createApp() {
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(JSON.stringify({ level: 'error', event: 'request.failed', error: String(err?.message ?? err) }));
     res.status(500).type('html').send(page('Something went wrong', '', `<h1>Something went wrong</h1>
-      <p class="sub">We logged the failure. Nothing was written.</p>
-      ${notice('info', 'Your work is safe', 'Try the page again. If it keeps happening, return to the queue and try from there.')}
+      <p class="sub">We logged the failure. Your existing data is safe.</p>
+      ${notice('info', 'Before you try again', 'If you were making a change, check the queue or refresh the page first. Then try again.')}
       <div class="row"><a class="button primary" href="/queue">Return to the queue</a></div>`));
   });
   return app;
