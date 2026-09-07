@@ -28,6 +28,11 @@ async function handleDetect(db: ReturnType<typeof openDb>, workspaceId: string, 
     await scope.audit('detect.skipped_purged', 'ok', { message_id: messageId });
     return;
   }
+  const priorDraft = await scope.draftForMessage(messageId);
+  if (priorDraft) {
+    await scope.audit('detect.deduplicated', 'ok', { message_id: messageId, draft_id: priorDraft.id });
+    return;
+  }
   const body: string = msg.body;
 
   // The provider meters itself now; the worker's job is to respect its answer.

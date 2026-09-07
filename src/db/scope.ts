@@ -123,11 +123,24 @@ export class WorkspaceScope {
   }
 
   // ---- drafts ----
+  /** The single draft produced for a source message, or undefined. */
+  async draftForMessage(sourceMessageId: string) {
+    return (await this.db.select().from(drafts).where(and(
+      eq(drafts.workspaceId, this.workspaceId), eq(drafts.sourceMessageId, sourceMessageId))).limit(1))[0];
+  }
+
   async createDraft(d: { sourceMessageId: string; title: string; outcome: string;
                          kind: 'commitment'|'request'|'decision'; confidence: number;
                          suggestedOwner: string | null; suggestedDueDate: string | null; provider: string;
                          expiresAt?: number }): Promise<string> {
-    const id = randomUUID();
+    // A duplicate detect job must not create a second draft. The pre-read handles
+    // normal retries, while the deterministic id plus conflict-safe insert closes
+    // the race where two workers pass that read at the same time. Existing rows
+    // with the old random ids are found by source_message_id and remain untouched.
+    const existing = await this.draftForMessage(d.sourceMessageId);
+    if (existing) return existing.id;
+    const id = 'd-' + createHash('sha256')
+      .update(`${this.workspaceId}:${d.sourceMessageId}`).digest('hex').slice(0, 32);
     const now = Date.now();
     await this.db.insert(drafts).values({
       workspaceId: this.workspaceId, id, sourceMessageId: d.sourceMessageId,
@@ -138,7 +151,10 @@ export class WorkspaceScope {
       // inferring one from created_at, so a per-workspace or per-plan lifetime is a
       // change at the point of writing and not a rewrite of the sweep query.
       expiresAt: d.expiresAt ?? now + DEFAULT_DRAFT_TTL_DAYS * DAY_MS,
-    });
+    }).onConflictDoNothing();
+    const stored = await this.draftForMessage(d.sourceMessageId);
+    if (!stored) throw new Error('draft insert did not produce a row');
+    if (stored.id !== id) return stored.id;
     await this.audit('draft.created', 'ok', { draft_id: id, confidence: Math.round(d.confidence) });
     return id;
   }
