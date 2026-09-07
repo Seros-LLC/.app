@@ -31,8 +31,8 @@ const bucketLabel = (b: WorkRow['bucket']) =>
 
 function rowsTable(rows: WorkRow[], caption: string): string {
   if (rows.length === 0) return '';
-  return `<p class="meta">${esc(caption)}</p>
-  <table>
+  return `<table>
+    <caption class="sr-only">${esc(caption)}</caption>
     <tr><th>What</th><th>Owner</th><th>Due</th><th>State</th></tr>
     ${rows.map((r) => `<tr>
       <td>${esc(r.title)}</td>

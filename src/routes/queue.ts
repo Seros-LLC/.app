@@ -48,9 +48,10 @@ export async function queuePage(req: Request, res: Response) {
   <p class="sub">${rows.length === 0
       ? 'The review desk for your workspace. Nothing reaches a tracker without your confirmation.'
       : `${rows.length} draft${rows.length === 1 ? '' : 's'} waiting. Nothing is written to a tracker until you confirm it.`}</p>
-  ${rows.length === 0 ? setupRail('queue', new Set<import('../views').SetupStep>(
-      connection ? (channels.length ? ['connect', 'channels'] : ['connect']) : []
-    )) + next : ''}
+  ${rows.length === 0 && !(connection && channels.length) ? setupRail('queue', new Set<import('../views').SetupStep>(
+      connection ? ['connect'] : []
+    )) : ''}
+  ${rows.length === 0 ? next : ''}
   ${rows.map((d) => `
     <form class="card" method="post" action="/confirm">
       <input type="hidden" name="draftId" value="${esc(d.id)}">

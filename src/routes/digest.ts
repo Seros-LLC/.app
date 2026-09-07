@@ -30,6 +30,7 @@ const WHY_TEXT: Record<string, string> = {
 function bucketTable(rows: WorkRow[], heading: string, empty: string): string {
   return `<h3>${esc(heading)}</h3>
   ${rows.length === 0 ? `<p class="sub">${esc(empty)}</p>` : `<table>
+    <caption class="sr-only">${esc(heading)} work items</caption>
     <tr><th>What</th><th>Owner</th><th>Due</th><th>When</th></tr>
     ${rows.map((r) => `<tr>
       <td>${esc(r.title)}</td>
