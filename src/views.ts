@@ -232,7 +232,7 @@ export function page(title: string, active: string, body: string, ctx: PageConte
   </a>
   <nav class="app-nav">
     ${nav}
-    <a href="https://seros.dev" target="_blank" rel="noopener" class="ext-link" title="Visit Marketing & Documentation Website">seros.dev &#8599;</a>
+    <a href="https://seros.dev/" class="ext-link" title="Back to the Seros website">&#8592; seros.dev</a>
   </nav>
   ${who}
 </div></header>
@@ -241,10 +241,11 @@ ${ctx.flash ? `<div class="flashbar"><div class="wrap"><p class="flash">${esc(ct
 <footer class="wrap app-foot">
   <div>Human confirmation required before any write. &copy; 2026 <strong>Seros, LLC</strong>.</div>
   <div>
-    <a href="https://seros.dev" target="_blank" rel="noopener">Website</a> &middot;
-    <a href="https://seros.dev/privacy.html" target="_blank" rel="noopener">Privacy</a> &middot;
-    <a href="https://seros.dev/terms.html" target="_blank" rel="noopener">Terms</a> &middot;
-    <a href="https://seros.dev/security.html" target="_blank" rel="noopener">Security</a>
+    <a href="https://seros.dev/">Website</a> &middot;
+    <a href="https://seros.dev/pricing">Pricing</a> &middot;
+    <a href="https://seros.dev/privacy">Privacy</a> &middot;
+    <a href="https://seros.dev/terms">Terms</a> &middot;
+    <a href="https://seros.dev/security">Security</a>
   </div>
 </footer>
 </body></html>`;
