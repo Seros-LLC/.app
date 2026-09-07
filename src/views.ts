@@ -15,6 +15,10 @@ export const CSS = `
   --seros-warning:#9A6B1E;
   --seros-danger:#8C2F39;
 
+  --success:var(--seros-success);
+  --warning:var(--seros-warning);
+  --danger:var(--seros-danger);
+
   --seros:var(--seros-blue);
   --ink:var(--seros-ink);
   --steel:var(--seros-steel);
