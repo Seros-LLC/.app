@@ -67,9 +67,15 @@ test('loginPost rejects invalid CAPTCHA answer', async () => {
 });
 
 test('loginPost accepts valid CAPTCHA answer structure', async () => {
+  // Login must be tested against an initialized store. The app does not provision
+  // an empty database simply because somebody submits an identifier.
+  const dir = mkdtempSync(join(tmpdir(), 'seros-login-captcha-'));
+  const dbPath = join(dir, 'seros.db');
+  const previousDb = process.env.SEROS_DB;
+  process.env.SEROS_DB = dbPath;
+  migrateDb(dbPath);
   const c = generateCaptcha();
   const answer = String(c.num1 + c.num2);
-
   const { loginPost } = require('../src/routes/login');
   let redirectUrl = '';
   let responseHtml = '';
@@ -79,20 +85,18 @@ test('loginPost accepts valid CAPTCHA answer structure', async () => {
     send: (body: string) => { responseHtml = body; return res; },
     redirect: (code: number, url: string) => { redirectUrl = url; return res; }
   };
-
-  const req: any = {
-    body: {
-      identifier: 'nonexistent-user@example.com',
-      password: 'password123',
-      captchaAnswer: answer,
-      captchaSig: c.sig,
-      captchaTs: c.ts
-    }
-  };
-
-  await loginPost(req, res);
-  // CAPTCHA passed, so it proceeds to credentials check and denies invalid user safely
-  assert.ok(responseHtml.includes('Sign-in failed') || redirectUrl.includes('/login'));
+  try {
+    await loginPost({ body: {
+      identifier: 'nonexistent-user@example.com', password: 'password123',
+      captchaAnswer: answer, captchaSig: c.sig, captchaTs: c.ts,
+    } } as any, res);
+    // CAPTCHA passed, so it proceeds to credentials check and denies invalid user safely.
+    assert.ok(responseHtml.includes('Sign-in failed') || redirectUrl.includes('/login'));
+  } finally {
+    if (previousDb === undefined) delete process.env.SEROS_DB;
+    else process.env.SEROS_DB = previousDb;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('loginPost cannot provision an absent workspace', async () => {
