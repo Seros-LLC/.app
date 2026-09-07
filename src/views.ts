@@ -30,6 +30,12 @@ export const CSS = `
   --serif:Georgia,"Iowan Old Style","Times New Roman",serif;
   --mono:"Courier New",Courier,ui-monospace,monospace;
   --maxw:1080px;
+
+  /* One scale, so a card, a notice and a form gutter cannot disagree. */
+  --gap:16px;
+  --pad:22px;
+  --radius:4px;
+  --shadow:0 2px 8px rgba(40,48,83,.05);
 }
 
 *{box-sizing:border-box}
@@ -56,7 +62,7 @@ header.app-header .wrap{display:flex; align-items:center; justify-content:space-
 .brand-title{font-family:var(--serif); font-weight:700; font-size:1.15rem; letter-spacing:.02em; color:var(--ink)}
 .app-tag{font-size:.64rem; font-family:var(--mono); letter-spacing:.12em; text-transform:uppercase; background:rgba(0,9,173,.08); color:var(--seros); padding:2px 7px; border-radius:10px; border:1px solid rgba(0,9,173,.2)}
 
-nav.app-nav{display:flex; items:center; gap:18px; flex-wrap:wrap}
+nav.app-nav{display:flex; align-items:center; gap:18px; flex-wrap:wrap}
 nav.app-nav a{
   color:var(--ink); opacity:.72; text-decoration:none; font-family:var(--mono);
   font-size:.8rem; letter-spacing:.08em; text-transform:uppercase; padding:6px 0; border-bottom:2px solid transparent;
@@ -69,7 +75,8 @@ nav.app-nav a.ext-link:hover{color:var(--seros); text-decoration:underline; text
 
 /* User Profile Badge */
 .who{display:flex; align-items:center; gap:12px; background:rgba(251,250,247,.6); border:1px solid var(--line); border-radius:20px; padding:4px 12px}
-.whoami{font-size:.74rem; letter-spacing:.06em; text-transform:uppercase; color:var(--ink); font-weight:600; display:flex; align-items:center; gap:6px}
+.whoami{font-size:.74rem; letter-spacing:.06em; text-transform:uppercase; color:var(--ink); font-weight:600; display:flex; align-items:center; gap:6px; text-decoration:none}
+.whoami:hover{color:var(--seros)}
 .whoami::before{content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--seros)}
 .role-pill{font-size:.62rem; font-family:var(--mono); letter-spacing:.08em; text-transform:uppercase; background:rgba(96,138,205,.12); color:var(--seros-ink); padding:1px 6px; border-radius:8px; border:1px solid var(--line)}
 button.linkish{border:0; background:none; padding:0; color:var(--steel); text-transform:uppercase; font-family:var(--mono); font-size:.7rem; letter-spacing:.08em; cursor:pointer; text-decoration:underline; text-underline-offset:3px}
@@ -102,28 +109,60 @@ h1{font-family:var(--serif); font-size:2.1rem; margin:28px 0 6px; letter-spacing
 
 /* Forms & Inputs */
 .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:16px}
-button{
-  font-family:var(--mono); font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; padding:10px 18px;
-  border:1px solid var(--seros); border-radius:2px; background:transparent; color:var(--seros); cursor:pointer;
-  transition:all .15s ease;
+button,.button{
+  display:inline-block; font-family:var(--mono); font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+  padding:10px 18px; border:1px solid var(--seros); border-radius:2px; background:transparent;
+  color:var(--seros); cursor:pointer; transition:all .15s ease; text-decoration:none; text-align:center;
 }
-button.primary{background:var(--seros); color:var(--paper); border-color:var(--seros)}
-button.primary:hover{background:var(--ink); border-color:var(--ink); color:#fff}
-button.ghost{border-color:var(--line); color:var(--steel)}
-button.ghost:hover{border-color:var(--steel); color:var(--ink)}
-button.danger{border-color:var(--danger); color:var(--danger)}
-button.danger:hover{background:var(--danger); color:#fff}
-button:active{transform:translateY(1px)}
+button.primary,.button.primary{background:var(--seros); color:var(--paper); border-color:var(--seros)}
+button.primary:hover,.button.primary:hover{background:var(--ink); border-color:var(--ink); color:#fff}
+button.ghost,.button.ghost{border-color:var(--line); color:var(--steel)}
+button.ghost:hover,.button.ghost:hover{border-color:var(--steel); color:var(--ink)}
+button.danger,.button.danger{border-color:var(--danger); color:var(--danger)}
+button.danger:hover,.button.danger:hover{background:var(--danger); color:#fff}
+button:active,.button:active{transform:translateY(1px)}
 
 input[type=text],input[type=date],input[type=password],input[type=email],select,textarea{
   font-family:var(--mono); font-size:.88rem; padding:9px 12px; border:1px solid var(--line);
-  background:var(--card); border-radius:2px; color:var(--ink); outline:none; transition:border-color .15s ease;
+  background:var(--card); border-radius:2px; color:var(--ink); outline:none; max-width:100%; transition:border-color .15s ease;
 }
 input:focus,select:focus,textarea:focus{border-color:var(--seros); box-shadow:0 0 0 2px rgba(0,9,173,.15)}
 label{display:block; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--steel); margin-bottom:5px; font-weight:600}
 
 .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
-.empty{padding:48px 24px; text-align:center; color:var(--steel); border:1px dashed var(--line); border-radius:4px; background:rgba(251,250,247,.5)}
+/* Empty state. Never a dead end: it says what is missing and what to press. */
+.empty{
+  padding:44px 28px; text-align:center; color:var(--steel);
+  border:1px dashed var(--line); border-radius:var(--radius); background:rgba(251,250,247,.5);
+}
+.empty h3{font-family:var(--serif); font-size:1.2rem; color:var(--ink); margin:0 0 8px}
+.empty p{margin:0 auto 18px; max-width:52ch}
+.empty .row{justify-content:center; margin-top:0}
+
+/* The onboarding rail: where you are in connect -> pick -> review -> confirm. */
+.steps{display:flex; gap:0; margin:0 0 26px; padding:0; list-style:none; flex-wrap:wrap; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; background:var(--card)}
+.steps li{flex:1 1 0; min-width:150px; padding:12px 16px; border-right:1px solid var(--line); font-size:.78rem; color:var(--steel); display:flex; gap:10px; align-items:baseline}
+.steps li:last-child{border-right:0}
+.steps .n{font-family:var(--serif); font-weight:700; font-size:.9rem; color:var(--line)}
+.steps li.done{color:var(--ink); background:rgba(47,107,79,.06)}
+.steps li.done .n{color:var(--success)}
+.steps li.done .n::before{content:'\\2713 '}
+.steps li.now{color:var(--ink); background:rgba(0,9,173,.06); font-weight:600}
+.steps .n{color:var(--steel)}
+.steps li.now .n{color:var(--seros)}
+.steps a{color:inherit; text-decoration:none}
+.steps a:hover{text-decoration:underline; text-underline-offset:3px}
+
+/* Channel picker rows. Used by /channels; previously had no rule at all. */
+.pick{
+  display:flex; align-items:center; gap:12px; padding:9px 10px; margin:0 -10px;
+  border-radius:2px; cursor:pointer; font-size:.88rem; text-transform:none;
+  letter-spacing:0; color:var(--ink); font-weight:400;
+}
+.pick:hover{background:rgba(184,218,255,.18)}
+.pick input{width:15px; height:15px; accent-color:var(--seros); cursor:pointer; margin:0}
+.pick + .pick{border-top:1px solid var(--line)}
+.pick span{flex:0 0 auto}
 
 /* Tables */
 .tablewrap{overflow-x:auto; margin-top:12px}
@@ -131,6 +170,27 @@ table{width:100%; border-collapse:collapse; font-size:.86rem}
 th{text-align:left; font-family:var(--mono); font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--steel); border-bottom:2px solid var(--line); padding:10px 8px}
 td{padding:11px 8px; border-bottom:1px solid var(--line); vertical-align:middle}
 tr:hover td{background:rgba(184,218,255,.1)}
+
+/* Notices. One component, four intents. Replaces .empty used as an alert with
+   inline colours, which no stylesheet could keep consistent. */
+.notice{
+  display:flex; gap:12px; align-items:flex-start;
+  border:1px solid var(--line); border-left:3px solid var(--steel);
+  background:rgba(251,250,247,.75); border-radius:0 var(--radius) var(--radius) 0;
+  padding:14px 16px; margin:0 0 18px; font-size:.86rem; color:var(--ink);
+}
+.notice p{margin:0}
+.notice p + p{margin-top:6px}
+.notice strong{font-family:var(--serif); font-size:.98rem; letter-spacing:.01em}
+.notice::before{font-weight:700; line-height:1.5; flex:0 0 auto}
+.notice.info::before{content:'i'; color:var(--seros)}
+.notice.good{border-left-color:var(--success)}
+.notice.good::before{content:'\\2713'; color:var(--success)}
+.notice.warn{border-left-color:var(--warning); background:rgba(154,107,30,.05)}
+.notice.warn::before{content:'!'; color:var(--warning)}
+.notice.bad{border-left-color:var(--danger); background:rgba(140,47,57,.05)}
+.notice.bad::before{content:'\\00d7'; color:var(--danger); font-size:1.1rem; line-height:1.2}
+.notice a{color:var(--seros)}
 
 /* Status Pills */
 .pill{
@@ -149,6 +209,36 @@ footer.app-foot{
 }
 footer.app-foot a{color:var(--steel); text-decoration:none}
 footer.app-foot a:hover{color:var(--seros); text-decoration:underline}
+
+/* Signed-out pages: sign in, set a password. A narrow plate, centred, with no
+   app navigation behind it, because none of those links work until you are in. */
+body.auth{display:flex; flex-direction:column; min-height:100vh}
+body.auth main.wrap{flex:1; display:flex; align-items:center; justify-content:center; padding-top:40px}
+.authbox{width:100%; max-width:430px}
+.authbox .brand-lockup{justify-content:center; margin-bottom:26px}
+.authbox h1{font-size:1.7rem; margin:0 0 6px; text-align:center}
+.authbox .sub{text-align:center; margin-bottom:22px; max-width:none}
+.authbox .card{padding:24px}
+.authbox label{margin-top:14px}
+.authbox label:first-of-type{margin-top:0}
+.authbox input[type=text],.authbox input[type=password],.authbox input[type=email]{width:100%}
+.authbox .row{margin-top:20px}
+.authbox .row button{width:100%; padding:12px 18px}
+.authbox .oauth-btn{flex:1 1 auto; justify-content:center}
+.authhelp{margin:22px auto 0; text-align:center; max-width:48ch; font-size:.75rem}
+.authhelp a{color:var(--seros)}
+.authbox footer.app-foot{margin-top:32px; justify-content:center; text-align:center}
+
+/* The CAPTCHA plate, previously six inline styles on the login page. */
+.captcha{margin-top:18px; padding:14px; background:rgba(237,231,222,.45); border:1px solid var(--line); border-radius:var(--radius)}
+.captcha .cap-row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+.captcha svg{border:1px solid var(--line); border-radius:2px; background:var(--card); flex:0 0 auto}
+.captcha input{width:110px; font-weight:700; letter-spacing:.1em; text-align:center}
+.captcha label{margin:0 0 8px}
+
+/* A labelled divider between the password form and the SSO buttons. */
+.or{display:flex; align-items:center; gap:14px; margin:24px 0 16px; color:var(--steel); font-size:.68rem; letter-spacing:.14em; text-transform:uppercase}
+.or::before,.or::after{content:''; flex:1; height:1px; background:var(--line)}
 
 /* OAuth buttons */
 .oauth-buttons{display:flex; gap:14px; margin-top:20px; flex-wrap:wrap}
@@ -176,11 +266,20 @@ code{background:#eae3d8; padding:2px 6px; border-radius:3px; font-size:.88em}
 @media(max-width:760px){
   .grid{grid-template-columns:1fr}
   header.app-header .wrap{padding-top:10px; padding-bottom:10px}
-  nav.app-nav{width:100%; overflow-x:auto; padding-bottom:4px}
+  nav.app-nav{width:100%; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch}
+  nav.app-nav a{white-space:nowrap}
   .who{margin-left:0; width:100%; justify-content:space-between}
   h1{font-size:1.65rem}
   .card{padding:16px}
   footer.app-foot{flex-direction:column; align-items:flex-start}
+  .steps{flex-direction:column}
+  .steps li{border-right:0; border-bottom:1px solid var(--line); min-width:0}
+  .steps li:last-child{border-bottom:0}
+  .oauth-buttons{flex-direction:column}
+  .oauth-btn{justify-content:center}
+  .row button,.row form,.row a{width:100%}
+  .row a button{width:100%}
+  main.wrap{padding-top:22px}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
 `;
@@ -191,6 +290,61 @@ export interface PageContext {
   csrf?: string | undefined;
   /** A one-line confirmation of what just happened. */
   flash?: string | undefined;
+  /**
+   * 'auth' drops the application navigation. A visitor who is not signed in
+   * cannot reach /queue or /members, so offering the links is a row of dead
+   * ends; the sign-in page shows the brand and the way back to the site instead.
+   */
+  chrome?: 'app' | 'auth' | undefined;
+}
+
+/** Intent of a notice. `bad` is a failure, `warn` a misconfiguration, `good` a success. */
+export type NoticeKind = 'info' | 'good' | 'warn' | 'bad';
+
+/**
+ * One notice component for every page. Before this, a failure was an `.empty`
+ * box with an inline colour, which meant each page invented its own alert and
+ * none of them agreed. Text is escaped; `html` is for a caller-built fragment
+ * that has already escaped its own values.
+ */
+export function notice(kind: NoticeKind, title: string, detail?: string, html?: string): string {
+  return `<div class="notice ${kind}" role="${kind === 'bad' || kind === 'warn' ? 'alert' : 'status'}">` +
+    `<div><p><strong>${esc(title)}</strong></p>` +
+    (detail ? `<p>${esc(detail)}</p>` : '') +
+    (html ?? '') +
+    `</div></div>`;
+}
+
+/**
+ * An empty state that names the next action instead of only reporting absence.
+ * `action` is a caller-built fragment, already escaped.
+ */
+export function empty(title: string, detail: string, action?: string): string {
+  return `<div class="empty"><h3>${esc(title)}</h3><p>${esc(detail)}</p>` +
+    (action ? `<div class="row">${action}</div>` : '') + `</div>`;
+}
+
+/** The four steps from an empty workspace to a confirmed task, and where you are. */
+export type SetupStep = 'connect' | 'channels' | 'queue' | 'tasks';
+const SETUP: [SetupStep, string, string][] = [
+  ['connect', '/connect', 'Connect Slack'],
+  ['channels', '/channels', 'Choose channels'],
+  ['queue', '/queue', 'Review drafts'],
+  ['tasks', '/tasks', 'Confirmed work'],
+];
+
+/**
+ * The onboarding rail. `done` is what the workspace has actually achieved, so a
+ * member can see the whole path on their first visit rather than discovering it
+ * one dead end at a time. Rendered only while setup is incomplete.
+ */
+export function setupRail(now: SetupStep, done: Set<SetupStep>): string {
+  const items = SETUP.map(([key, href, label], i) => {
+    const cls = key === now ? 'now' : done.has(key) ? 'done' : '';
+    const inner = `<span class="n">${i + 1}</span><span>${esc(label)}</span>`;
+    return `<li class="${cls}">${key === now ? inner : `<a href="${href}">${inner}</a>`}</li>`;
+  }).join('');
+  return `<ol class="steps" aria-label="Setup progress">${items}</ol>`;
 }
 
 const NAV: [string, string][] = [
@@ -203,42 +357,13 @@ const NAV: [string, string][] = [
   ['/audit', 'Audit'],
 ];
 
-export function page(title: string, active: string, body: string, ctx: PageContext = {}): string {
-  const nav = NAV.map(([href, label]) =>
-    `<a href="${href}"${active === href ? ' class="on" aria-current="page"' : ''}>${label}</a>`).join('');
-
-  const who = ctx.member
-    ? `<div class="who"><span class="whoami" title="Role: ${esc(ctx.member.role)}">${esc(ctx.member.name)} <span class="role-pill">${esc(ctx.member.role)}</span></span>` +
-      (ctx.csrf
-        ? `<form method="post" action="/logout"><input type="hidden" name="csrf" value="${esc(ctx.csrf)}">` +
-          `<button class="linkish" type="submit">Sign out</button></form>`
-        : '') +
-      `</div>`
-    : `<div class="who"><a href="/login" class="linkish">Sign In</a></div>`;
-
-  return `<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light">
-<meta name="robots" content="noindex,nofollow">
-<link rel="icon" href="/assets/icon-192.png">
-<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-<title>${esc(title)} — Seros</title><style>${CSS}</style></head><body>
-<a class="skip" href="#main">Skip to content</a>
-<header class="app-header"><div class="wrap">
-  <a class="brand-lockup" href="/queue">
-    <img src="/assets/icon-192.png" alt="Seros Logo">
+const BRAND = (href: string) => `<a class="brand-lockup" href="${href}">
+    <img src="/assets/icon-192.png" alt="">
     <span class="brand-title">SEROS</span>
     <span class="app-tag">App</span>
-  </a>
-  <nav class="app-nav">
-    ${nav}
-    <a href="https://seros.dev/" class="ext-link" title="Back to the Seros website">&#8592; seros.dev</a>
-  </nav>
-  ${who}
-</div></header>
-${ctx.flash ? `<div class="flashbar"><div class="wrap"><p class="flash">${esc(ctx.flash)}</p></div></div>` : ''}
-<main class="wrap" id="main">${body}</main>
-<footer class="wrap app-foot">
+  </a>`;
+
+const FOOT = `<footer class="wrap app-foot">
   <div>Human confirmation required before any write. &copy; 2026 <strong>Seros, LLC</strong>.</div>
   <div>
     <a href="https://seros.dev/">Website</a> &middot;
@@ -247,6 +372,52 @@ ${ctx.flash ? `<div class="flashbar"><div class="wrap"><p class="flash">${esc(ct
     <a href="https://seros.dev/terms">Terms</a> &middot;
     <a href="https://seros.dev/security">Security</a>
   </div>
-</footer>
+</footer>`;
+
+export function page(title: string, active: string, body: string, ctx: PageContext = {}): string {
+  // A signed-out page carries no application navigation. Every link in it would
+  // bounce off requireSession and come back to this same page.
+  const auth = ctx.chrome === 'auth';
+
+  const nav = NAV.map(([href, label]) =>
+    `<a href="${href}"${active === href ? ' class="on" aria-current="page"' : ''}>${label}</a>`).join('');
+
+  const who = ctx.member
+    ? `<div class="who"><a class="whoami" href="/password" title="Your account. Role: ${esc(ctx.member.role)}">${esc(ctx.member.name)} <span class="role-pill">${esc(ctx.member.role)}</span></a>` +
+      (ctx.csrf
+        ? `<form method="post" action="/logout"><input type="hidden" name="csrf" value="${esc(ctx.csrf)}">` +
+          `<button class="linkish" type="submit">Sign out</button></form>`
+        : '') +
+      `</div>`
+    : `<div class="who"><a href="/login" class="linkish">Sign in</a></div>`;
+
+  const header = auth
+    ? `<header class="app-header"><div class="wrap">
+  ${BRAND('/login')}
+  <nav class="app-nav">
+    <a href="https://seros.dev/" class="ext-link" title="Back to the Seros website">&#8592; seros.dev</a>
+  </nav>
+</div></header>`
+    : `<header class="app-header"><div class="wrap">
+  ${BRAND('/queue')}
+  <nav class="app-nav">
+    ${nav}
+    <a href="https://seros.dev/" class="ext-link" title="Back to the Seros website">&#8592; seros.dev</a>
+  </nav>
+  ${who}
+</div></header>`;
+
+  return `<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/assets/icon-192.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<title>${esc(title)} — Seros</title><style>${CSS}</style></head><body${auth ? ' class="auth"' : ''}>
+<a class="skip" href="#main">Skip to content</a>
+${header}
+${ctx.flash ? `<div class="flashbar"><div class="wrap"><p class="flash">${esc(ctx.flash)}</p></div></div>` : ''}
+<main class="wrap" id="main">${auth ? `<div class="authbox">${body}</div>` : body}</main>
+${FOOT}
 </body></html>`;
 }

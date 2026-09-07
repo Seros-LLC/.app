@@ -12,7 +12,7 @@ import {
 } from './routes/login';
 import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
 import { cronDrain } from './routes/cron';
-import { page } from './views';
+import { page, empty, notice } from './views';
 import { configurePassport, oauthCallback, oauthError, oauthStart } from './routes/oauth';
 import { connectPage, connectStart, connectCallback, disconnect, channelsPage, channelsSave } from './routes/connect';
 import passport from 'passport';
@@ -130,12 +130,19 @@ export function createApp() {
   app.get('/', (_req, res) => res.redirect(302, '/queue'));
 
   app.use((_req, res) => res.status(404).type('html')
-    .send(page('Not found', '', '<h1>Not found</h1><p class="sub">No such page.</p>')));
+    .send(page('Not found', '', `<h1>That page is not here</h1>
+      <p class="sub">The address may be old, or it may have been typed incorrectly.</p>
+      ${empty('Get back to your workspace',
+          'Your drafts, tasks, connections, and audit log are still available.',
+          '<a class="button primary" href="/queue">Open the queue &rarr;</a>')}`)));
 
   // Nothing leaks a stack trace or a message body to the client.
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(JSON.stringify({ level: 'error', event: 'request.failed', error: String(err?.message ?? err) }));
-    res.status(500).type('html').send(page('Error', '', '<h1>Something went wrong</h1><p class="sub">The failure was logged. Nothing was written.</p>'));
+    res.status(500).type('html').send(page('Something went wrong', '', `<h1>Something went wrong</h1>
+      <p class="sub">We logged the failure. Nothing was written.</p>
+      ${notice('info', 'Your work is safe', 'Try the page again. If it keeps happening, return to the queue and try from there.')}
+      <div class="row"><a class="button primary" href="/queue">Return to the queue</a></div>`));
   });
   return app;
 }

@@ -15,7 +15,7 @@ import { WorkspaceScope } from '../db/scope';
 import { slackClient } from '../slack/client';
 import { seal, open as openSecret, encryptionConfigured } from '../crypto';
 import { csrfToken } from '../auth';
-import { page, esc } from '../views';
+import { page, esc, empty, notice, setupRail } from '../views';
 
 /** Read-only, and the narrowest set that supports v0. Shown to the admin verbatim. */
 export const SLACK_SCOPES = [
@@ -51,37 +51,45 @@ export async function connectPage(req: Request, res: Response) {
 
   const scopeList = SLACK_SCOPES.map((x) => `<li><code>${esc(x)}</code></li>`).join('');
   const body = conn
-    ? `<h1>Slack</h1>
-       <p class="sub">Connected to ${esc(conn.teamName ?? conn.teamId)}.</p>
+    ? `<h1>Slack is connected</h1>
+       <p class="sub">${esc(conn.teamName ?? conn.teamId)} is connected. You stay in control of what Seros may read.</p>
+       ${setupRail(selected.length ? 'queue' : 'channels', new Set<import('../views').SetupStep>(
+          selected.length ? ['connect', 'channels'] : ['connect']
+        ))}
+       ${selected.length
+          ? notice('good', `${selected.length} channel${selected.length === 1 ? '' : 's'} selected`,
+              'Seros reads those channels and nothing else. Drafts still wait for a person to confirm them.')
+          : notice('info', 'The next step is choosing channels',
+              'Slack is connected, but Seros has not been allowed to read any channels yet.')}
        <div class="card">
-         <h3>What we read</h3>
-         <p class="sub">${selected.length} channel${selected.length === 1 ? '' : 's'} selected.
-            We read those channels and nothing else.</p>
+         <h3>Channel permission</h3>
+         <p class="sub">The channel picker is the permission record. You can change or remove that permission at any time.</p>
          <div class="row">
-           <a href="/channels"><button type="button">Choose channels</button></a>
+           <a class="button primary" href="/channels">${selected.length ? 'Manage channels' : 'Choose channels &rarr;'}</a>
            <form method="post" action="/connect/slack/disconnect">
              <input type="hidden" name="csrf" value="${esc(csrf)}">
-             <button type="submit">Disconnect</button>
+             <button class="danger" type="submit">Disconnect Slack</button>
            </form>
          </div>
        </div>
-       <div class="card"><h3>Scopes granted</h3><ul>${scopeList}</ul></div>`
+       <div class="card"><h3>Scopes granted</h3><p class="meta">These are the Slack permissions granted at connection time.</p><ul>${scopeList}</ul></div>`
     : `<h1>Connect Slack</h1>
-       <p class="sub">Seros reads the channels you choose, drafts tasks, and writes nothing
-          until a person confirms.</p>
-       <div class="card">
-         <h3>What Seros will ask for</h3>
+       <p class="sub">Choose the Slack workspace, then choose the exact channels Seros may read. Seros drafts work; it never writes without your confirmation.</p>
+       ${setupRail('connect', new Set())}
+       ${requireAdmin(me?.role)
+          ? `<div class="card">
+               <h3>Connect, then choose channels</h3>
+               <p class="sub">Slack will show its own consent screen. After it returns you here, no channel is read until you select it yourself.</p>
+               <div class="row"><form method="post" action="/connect/slack">
+                 <input type="hidden" name="csrf" value="${esc(csrf)}">
+                 <button class="primary" type="submit">Continue to Slack &rarr;</button>
+               </form></div>
+             </div>`
+          : notice('info', 'An owner or admin connects Slack',
+              'Ask a workspace owner or admin to complete this step. You will be able to review drafts once the channels are selected.')}
+       <div class="card"><h3>What Seros asks Slack for</h3>
+         <p class="sub">The permissions below let Seros list channels, read the ones you select, and return a confirmed tracker link to the source thread.</p>
          <ul>${scopeList}</ul>
-         <p class="sub">Read access is limited to the channels you tick after connecting.
-            No channel is read until you do.</p>
-         <div class="row">
-           ${requireAdmin(me?.role)
-             ? `<form method="post" action="/connect/slack">
-                  <input type="hidden" name="csrf" value="${esc(csrf)}">
-                  <button class="primary" type="submit">Connect Slack</button>
-                </form>`
-             : `<p class="sub">An owner or admin connects Slack for this workspace.</p>`}
-         </div>
        </div>`;
   res.type('html').send(page('Slack', '/connect', body, { member: me as any, csrf }));
 }
@@ -188,15 +196,23 @@ export async function channelsPage(req: Request, res: Response) {
       ${c.isPrivate ? '<span class="pill">private</span>' : ''}
     </label>`).join('');
 
-  const body = `<h1>Channels</h1>
-    <p class="sub">We only read the channels ticked here. Nothing else in your Slack is read,
-       and no message is stored from a channel you have not ticked.</p>
-    <form method="post" action="/channels">
-      <input type="hidden" name="csrf" value="${esc(csrf)}">
-      <div class="card">${items || '<p class="sub">No channels visible yet. Invite the app to a channel and reload.</p>'}</div>
-      <div class="row"><button class="primary" type="submit">Save selection</button>
-        <a href="/connect"><button type="button">Back</button></a></div>
-    </form>`;
+  const body = `<h1>Choose channels</h1>
+    <p class="sub">This is your permission list. Seros reads only the channels you tick, and stores nothing from the rest of Slack.</p>
+    ${setupRail('channels', new Set<import('../views').SetupStep>(['connect']))}
+    ${items
+      ? `<form method="post" action="/channels">
+          <input type="hidden" name="csrf" value="${esc(csrf)}">
+          <div class="card">
+            <h3>Channels Seros may read</h3>
+            <p class="meta">Tick a channel to allow it. Untick it to stop future reads.</p>
+            ${items}
+          </div>
+          <div class="row"><button class="primary" type="submit">Save selection &rarr;</button>
+            <a class="button" href="/connect">Back to Slack</a></div>
+        </form>`
+      : empty('No channels are visible yet',
+          'Invite the Seros app to a Slack channel, then return here. We keep the current permission list untouched if Slack is unavailable.',
+          '<a class="button" href="/connect">Back to Slack</a>')}`;
   res.type('html').send(page('Channels', '/channels', body, { member: me as any, csrf,
     flash: req.query.msg === 'connected' ? 'Slack connected. Choose the channels Seros may read.' : undefined }));
 }

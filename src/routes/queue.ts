@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
-import { page, esc } from '../views';
+import { page, esc, empty, setupRail } from '../views';
 import type { PageContext } from '../views';
 
 import { csrfToken } from '../auth';
@@ -28,11 +28,29 @@ export async function queuePage(req: Request, res: Response) {
   const rows = await scope.pendingDrafts();
   const reasons = await reasonsFor(scope, rows.map((d) => d.id));
   const flash = typeof req.query.msg === 'string' ? req.query.msg.slice(0, 200) : '';
+  const connection = await scope.connection();
+  const channels = connection ? await scope.selectedChannels() : [];
+
+  const next = !connection
+    ? empty('Start by connecting Slack',
+        'Seros cannot read or draft anything until an owner or admin connects the workspace.',
+        '<a class="button primary" href="/connect">Connect Slack &rarr;</a>')
+    : channels.length === 0
+    ? empty('Choose what Seros may read',
+        'Slack is connected, but no channels are selected. Seros reads only the channels you tick.',
+        '<a class="button primary" href="/channels">Choose channels &rarr;</a>')
+    : empty('Nothing is waiting for review',
+        `Seros is watching ${channels.length} selected channel${channels.length === 1 ? '' : 's'}. When it finds a possible task, it will appear here for a person to review.`,
+        '<a class="button" href="/tasks">See confirmed tasks</a>');
 
   const body = `
   <h1>Confirm queue</h1>
-  <p class="sub">${rows.length} draft${rows.length === 1 ? '' : 's'} waiting. Nothing is written to a tracker until you confirm it.</p>
-  ${rows.length === 0 ? `<div class="empty">The queue is empty. Connect Slack and select channels to receive reviewed drafts.</div>` : ''}
+  <p class="sub">${rows.length === 0
+      ? 'The review desk for your workspace. Nothing reaches a tracker without your confirmation.'
+      : `${rows.length} draft${rows.length === 1 ? '' : 's'} waiting. Nothing is written to a tracker until you confirm it.`}</p>
+  ${rows.length === 0 ? setupRail('queue', new Set<import('../views').SetupStep>(
+      connection ? (channels.length ? ['connect', 'channels'] : ['connect']) : []
+    )) + next : ''}
   ${rows.map((d) => `
     <form class="card" method="post" action="/confirm">
       <input type="hidden" name="draftId" value="${esc(d.id)}">
@@ -66,9 +84,11 @@ export async function tasksPage(req: Request, res: Response) {
   const scope = await WorkspaceScope.open(db, req.serosSession!.workspaceId);
   const rows = await scope.taskRows();
 
-  const body = `<h1>Tasks</h1>
-  <p class="sub">Every row here has a confirmation behind it. There is no other way for one to exist.</p>
-  ${rows.length === 0 ? `<div class="empty">No tasks yet. Confirm something in the <a href="/queue">queue</a> and it will appear here.</div>` : `<div class="tablewrap"><table>
+  const body = `<h1>Confirmed tasks</h1>
+  <p class="sub">Every row has a confirmation behind it. There is no other way for a task to exist.</p>
+  ${rows.length === 0 ? empty('No confirmed tasks yet',
+      'Review a draft in the queue first. Once a person confirms it, it appears here with a complete audit trail.',
+      '<a class="button primary" href="/queue">Open the queue &rarr;</a>') : `<div class="tablewrap"><table>
     <tr><th>Title</th><th>Owner</th><th>Due</th><th>Confirmed by</th><th>State</th></tr>
     ${rows.map((t) => `<tr><td>${esc(t.title)}</td><td>${esc(t.owner ?? '—')}</td>
       <td>${esc(t.due ?? '—')}</td><td>${esc(t.memberId)}</td>
@@ -82,8 +102,10 @@ export async function auditPage(req: Request, res: Response) {
   const scope = await WorkspaceScope.open(db, req.serosSession!.workspaceId);
   const rows = await scope.auditRows();
   const body = `<h1>Audit log</h1>
-  <p class="sub">Append-only. Identifiers only — no message content ever reaches this table.</p>
-  ${rows.length === 0 ? '<div class="empty">Nothing recorded yet.</div>' : `<div class="tablewrap"><table>
+  <p class="sub">Append-only. Identifiers only &mdash; no message content ever reaches this table.</p>
+  ${rows.length === 0 ? empty('No activity recorded yet',
+      'This log starts when someone connects a source, changes a permission, or reviews work. Message content is never recorded here.',
+      '<a class="button" href="/connect">Connect Slack</a>') : `<div class="tablewrap"><table>
     <tr><th>#</th><th>When</th><th>Event</th><th>Outcome</th><th>Detail</th></tr>
     ${rows.map((r) => `<tr><td>${r.id}</td><td>${new Date(r.at).toISOString().replace('T', ' ').slice(0, 19)}</td>
       <td>${esc(r.event)}</td><td><span class="pill ${r.outcome === 'ok' ? 'ok' : ''}">${esc(r.outcome)}</span></td>
