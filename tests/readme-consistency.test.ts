@@ -23,6 +23,13 @@ test('README does not direct operators to the removed synthetic demo route', () 
     'README should direct local operators to authenticated login');
 });
 
+test('README quickstart generates the secrets required before the server starts', () => {
+  assert.match(readme, /export SEROS_SESSION_SECRET="\$\(openssl rand -hex 32\)"/,
+    'README quickstart must generate the required session signing secret');
+  assert.match(readme, /export SEROS_SIGNING_SECRET="\$\(openssl rand -hex 32\)"/,
+    'README quickstart must generate the required Slack request-signing secret');
+});
+
 test('README documents each maintenance CLI exposed by package.json', () => {
   for (const [name, entry] of [
     ['sweep', 'src/sweep.ts'],

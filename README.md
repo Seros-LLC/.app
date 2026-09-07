@@ -13,6 +13,9 @@ then write anything anywhere.
 
 ```bash
 npm install
+# Required even locally. Generate unique values and do not commit them.
+export SEROS_SESSION_SECRET="$(openssl rand -hex 32)"
+export SEROS_SIGNING_SECRET="$(openssl rand -hex 32)"
 npm run migrate          # creates .seros/seros.db
 npm run seed             # creates demo members and prints generated passwords once
 npm start                # web app on http://localhost:3000
