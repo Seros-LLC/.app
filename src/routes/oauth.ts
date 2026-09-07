@@ -90,6 +90,7 @@ export function configurePassport() {
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
       callbackURL: githubCallback,
       scope: ['user:email'],
+      state: true,
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {

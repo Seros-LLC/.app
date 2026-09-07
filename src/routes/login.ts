@@ -13,8 +13,10 @@
  * recorded in the audit log, where the operator can see it and the attacker cannot.
  */
 import type { Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
+import { accountForEmail } from '../db/system';
 import {
   clearSession, startSession, csrfToken, csrfOk, currentSession,
 } from '../auth';
@@ -124,11 +126,88 @@ export async function loginPage(req: Request, res: Response) {
     </a>
   </div>
 
-  <p class="meta authhelp">No account yet? Seros is invite-only while we are in private beta &mdash;
-     an owner or admin of your workspace issues the invite.
-     <a href="https://seros.dev/#audit">Ask for one here</a>.</p>`;
+  <p class="meta authhelp">No account yet? <a href="/signup">Create a workspace</a>.</p>`;
 
   res.type('html').send(page('Sign in', '/login', body, { chrome: 'auth' }));
+}
+
+// ---------------------------------------------------------------------------
+// GET/POST /signup - create a new workspace and its first owner
+// ---------------------------------------------------------------------------
+
+export async function signupPage(req: Request, res: Response) {
+  const err = flash(req, 'err');
+  const captcha = generateCaptcha();
+  const body = `<h1>Create your workspace</h1>
+  <p class="sub">Start with one owner. You can invite your team after you sign in.</p>
+  ${err ? notice('bad', 'We could not create that account', err) : ''}
+  <form class="card" method="post" action="/signup">
+    <label for="name">Your name</label>
+    <input id="name" type="text" name="name" autocomplete="name" maxlength="120" required autofocus>
+
+    <label for="email">Email address</label>
+    <input id="email" type="email" name="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required>
+
+    <label for="workspace">Workspace name</label>
+    <input id="workspace" type="text" name="workspace" autocomplete="organization" maxlength="120" required>
+    <p class="meta">Use your team or company name. You can connect Slack after you sign in.</p>
+
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" autocomplete="new-password" required aria-describedby="password-help">
+    <p class="meta" id="password-help">Use at least ${passwordMinLength()} characters and four distinct characters.</p>
+
+    <div class="captcha">
+      <label for="captchaAnswer">Human check &mdash; add the two numbers</label>
+      <div class="cap-row">
+        ${captcha.svg}
+        <input id="captchaAnswer" type="text" name="captchaAnswer" inputmode="numeric" placeholder="Answer" required autocomplete="off">
+      </div>
+      <input type="hidden" name="captchaSig" value="${esc(captcha.sig)}">
+      <input type="hidden" name="captchaTs" value="${captcha.ts}">
+    </div>
+    <div class="row"><button class="primary" type="submit">Create account &rarr;</button></div>
+  </form>
+  <p class="meta authhelp">Already have an account? <a href="/login">Sign in</a>.</p>`;
+  return res.type('html').send(page('Create account', '/signup', body, { chrome: 'auth' }));
+}
+
+export async function signupPost(req: Request, res: Response) {
+  const captchaAnswer = String(req.body?.captchaAnswer ?? '');
+  const captchaSig = String(req.body?.captchaSig ?? '');
+  const captchaTs = Number(req.body?.captchaTs ?? 0);
+  if (!verifyCaptcha(captchaAnswer, captchaSig, captchaTs)) {
+    return res.redirect(303, '/signup?err=' + encodeURIComponent('That verification did not go through. Try the new challenge.'));
+  }
+
+  const name = String(req.body?.name ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+  const workspaceName = String(req.body?.workspace ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+  const email = normaliseEmail(req.body?.email);
+  const password = String(req.body?.password ?? '');
+  const problem = !name ? 'Enter your name.'
+    : !workspaceName ? 'Enter a workspace name.'
+    : !email ? 'Enter a valid email address.'
+    : passwordPolicyError(password);
+  if (problem) return res.redirect(303, '/signup?err=' + encodeURIComponent(problem));
+
+  // A signup may create exactly one new random workspace. It never opens, seeds,
+  // or grants access to the configured workspace, so anonymous traffic cannot
+  // take over an existing tenant.
+  const db = openDb();
+  if (await accountForEmail(db, email!)) {
+    return res.redirect(303, '/login?msg=' + encodeURIComponent('An account already exists for that email. Sign in instead.'));
+  }
+  const workspaceId = `ws-${randomUUID()}`;
+  const memberId = `m-${randomUUID()}`;
+  const scope = await WorkspaceScope.ensure(db, workspaceId, workspaceName);
+  const creds = MemberCredentials.for(db, scope);
+  await scope.addMember(memberId, name, 'owner');
+  await creds.setEmail(memberId, email!);
+  await creds.setPassword(memberId, await hashPassword(password));
+  await scope.audit('workspace.signup', 'ok', { member_id: memberId },
+                    { actorType: 'member', actorId: memberId, objectType: 'workspace', objectId: workspaceId });
+  const pv = await creds.passwordVersion(memberId);
+  startSession(res, { workspaceId, memberId, pv });
+  return res.redirect(303, '/queue?msg=' + encodeURIComponent('Workspace created. Connect Slack when you are ready.'));
 }
 
 // ---------------------------------------------------------------------------
@@ -147,23 +226,23 @@ export async function loginPost(req: Request, res: Response) {
   const identifier = String(req.body?.identifier ?? req.body?.memberId ?? req.body?.email ?? '').trim().slice(0, 320);
   const password = String(req.body?.password ?? '');
   const db = openDb();
-  const ws = WS();
+  const configuredWorkspace = WS();
+  const email = normaliseEmail(identifier);
+  // Email may belong to any self-created workspace. A bare member id remains
+  // scoped to the operator-configured workspace because ids are not globally
+  // meaningful and must never become a cross-tenant discovery feature.
+  const account = email ? await accountForEmail(db, email) : null;
+  const workspaceId = account?.workspaceId ?? configuredWorkspace;
   let scope: WorkspaceScope;
   try {
-    scope = await WorkspaceScope.open(db, ws);
+    scope = await WorkspaceScope.open(db, workspaceId);
   } catch {
-    // An anonymous request must never provision a tenant. Pay the same scrypt cost
-    // as a bad password and return the same response as every other denial.
     await verifyPassword(password, null);
     return deny(res, null, null, 'unknown_identifier');
   }
   const creds = MemberCredentials.for(db, scope);
   const now = Date.now();
-
-  // email OR member id: an address wins if it resolves, otherwise it is an id.
-  const email = normaliseEmail(identifier);
-  const byEmailResult = email ? await creds.byEmail(email) : undefined;
-  const memberId = (byEmailResult?.memberId) ?? (email ? '' : identifier);
+  const memberId = account?.memberId ?? (email ? '' : identifier);
   const member = memberId ? await scope.member(memberId) : undefined;
 
   if (!member || member.status !== 'active') {
@@ -205,7 +284,7 @@ export async function loginPost(req: Request, res: Response) {
   // The session id itself is deliberately NOT recorded: the audit page is readable by
   // every member, and a session identifier is not theirs to read.
   const pv = await creds.passwordVersion(member.id);
-  startSession(res, { workspaceId: ws, memberId: member.id, pv });
+  startSession(res, { workspaceId, memberId: member.id, pv });
   await scope.audit('session.started', 'ok', { member_id: member.id, mode: 'password' },
                     { actorType: 'member', actorId: member.id, objectType: 'member', objectId: member.id });
   return res.redirect(303, '/queue');

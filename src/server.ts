@@ -7,7 +7,7 @@ import { confirmHandler } from './routes/confirm';
 import { askPage, askPost } from './routes/ask';
 import { digestPage } from './routes/digest';
 import {
-  loginPage, loginPost, logoutPost, setPasswordPage, setPasswordPost,
+  loginPage, loginPost, signupPage, signupPost, logoutPost, setPasswordPage, setPasswordPost,
   passwordPage, passwordChangePost, membersPage, invitePost,
 } from './routes/login';
 import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
@@ -98,6 +98,8 @@ export function createApp() {
   app.all('/api/cron/drain', cronDrain);
   app.get('/login', loginPage);
   app.post('/login', rateLimit('login', 20, 60_000), loginPost);
+  app.get('/signup', signupPage);
+  app.post('/signup', rateLimit('signup', 5, 60_000), asyncHandler(signupPost));
   app.post('/logout', logoutPost);
   app.get('/set-password', setPasswordPage);
   app.post('/set-password', rateLimit('setpw', 10, 60_000), setPasswordPost);

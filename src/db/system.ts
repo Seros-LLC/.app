@@ -2,7 +2,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from './client';
 import { dialect } from './client';
-import { jobs, workspaces, sourceConnections } from './schema';
+import { jobs, workspaces, sourceConnections, members, memberCredentials, oauthProviders } from './schema';
 
 export type JobRow = typeof jobs.$inferSelect;
 
@@ -177,4 +177,29 @@ export async function workspaceIdForSlackTeam(db: Db, teamId: string): Promise<s
   const row = (rows as any[])[0];
   if (!row || row.revokedAt) return null;
   return row.workspaceId as string;
+}
+
+
+/**
+ * Resolve a sign-in identity before a WorkspaceScope exists. This is deliberately
+ * the only account-discovery path across tenants: it returns opaque identifiers,
+ * never a roster or profile, and callers must still open the returned scope and
+ * verify the credential or OAuth provider proof.
+ */
+export async function accountForEmail(db: Db, email: string): Promise<{ workspaceId: string; memberId: string } | null> {
+  const rows = await db.select({ workspaceId: memberCredentials.workspaceId, memberId: memberCredentials.memberId })
+    .from(memberCredentials)
+    .innerJoin(members, and(eq(members.workspaceId, memberCredentials.workspaceId), eq(members.id, memberCredentials.memberId)))
+    .where(and(eq(memberCredentials.email, email), eq(members.status, 'active')))
+    .limit(2);
+  return rows.length === 1 ? rows[0]! : null;
+}
+
+export async function accountForOAuth(db: Db, provider: 'google' | 'github', providerUserId: string): Promise<{ workspaceId: string; memberId: string } | null> {
+  const rows = await db.select({ workspaceId: oauthProviders.workspaceId, memberId: oauthProviders.memberId })
+    .from(oauthProviders)
+    .innerJoin(members, and(eq(members.workspaceId, oauthProviders.workspaceId), eq(members.id, oauthProviders.memberId)))
+    .where(and(eq(oauthProviders.provider, provider), eq(oauthProviders.providerUserId, providerUserId), eq(members.status, 'active')))
+    .limit(2);
+  return rows.length === 1 ? rows[0]! : null;
 }

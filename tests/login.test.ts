@@ -146,3 +146,88 @@ test('importing the seed module has no database side effect', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('signup creates a separate workspace owner and a signed-in session', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seros-signup-'));
+  const dbPath = join(dir, 'seros.db');
+  const previousDb = process.env.SEROS_DB;
+  process.env.SEROS_DB = dbPath;
+  migrateDb(dbPath);
+  const { signupPost } = require('../src/routes/login');
+  const c = generateCaptcha();
+  let redirectUrl = '';
+  let cookie = '';
+  const res: any = {
+    redirect: (_code: number, url: string) => { redirectUrl = url; return res; },
+    setHeader: (name: string, value: string) => { if (name === 'Set-Cookie') cookie = value; return res; },
+  };
+  try {
+    await signupPost({ body: {
+      name: 'New Owner', workspace: 'New Workspace', email: 'owner@example.com',
+      password: 'correct horse battery staple',
+      captchaAnswer: String(c.num1 + c.num2), captchaSig: c.sig, captchaTs: c.ts,
+    } } as any, res);
+    assert.match(redirectUrl, /^\/queue\?msg=/);
+    assert.match(cookie, /seros_session=/);
+    const db = require('../src/db/client').openDb(dbPath);
+    const rows = await db.select().from(require('../src/db/schema').workspaces);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, 'New Workspace');
+    const scope = await WorkspaceScope.open(db, rows[0].id);
+    const members = await scope.memberByEmail('owner@example.com');
+    assert.ok(members);
+    assert.equal(members.members.name, 'New Owner');
+    assert.equal(members.members.role, 'owner');
+  } finally {
+    if (previousDb === undefined) delete process.env.SEROS_DB;
+    else process.env.SEROS_DB = previousDb;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a self-created owner can sign in by email after the signup session ends', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seros-signup-login-'));
+  const dbPath = join(dir, 'seros.db');
+  const previousDb = process.env.SEROS_DB;
+  process.env.SEROS_DB = dbPath;
+  migrateDb(dbPath);
+  const { signupPost, loginPost } = require('../src/routes/login');
+  const signupCaptcha = generateCaptcha();
+  const signupRes: any = {
+    redirect: () => signupRes,
+    setHeader: () => signupRes,
+  };
+  try {
+    await signupPost({ body: {
+      name: 'Returning Owner', workspace: 'Returning Workspace', email: 'returning@example.com',
+      password: 'correct horse battery staple',
+      captchaAnswer: String(signupCaptcha.num1 + signupCaptcha.num2), captchaSig: signupCaptcha.sig, captchaTs: signupCaptcha.ts,
+    } } as any, signupRes);
+    const loginCaptcha = generateCaptcha();
+    let redirectUrl = '';
+    let cookie = '';
+    const loginRes: any = {
+      redirect: (_code: number, url: string) => { redirectUrl = url; return loginRes; },
+      setHeader: (name: string, value: string) => { if (name === 'Set-Cookie') cookie = value; return loginRes; },
+    };
+    await loginPost({ body: {
+      identifier: 'returning@example.com', password: 'correct horse battery staple',
+      captchaAnswer: String(loginCaptcha.num1 + loginCaptcha.num2), captchaSig: loginCaptcha.sig, captchaTs: loginCaptcha.ts,
+    } } as any, loginRes);
+    assert.equal(redirectUrl, '/queue');
+    assert.match(cookie, /seros_session=/);
+  } finally {
+    if (previousDb === undefined) delete process.env.SEROS_DB;
+    else process.env.SEROS_DB = previousDb;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('signup rejects an invalid CAPTCHA before opening a database', async () => {
+  const { signupPost } = require('../src/routes/login');
+  let redirectUrl = '';
+  const res: any = { redirect: (_code: number, url: string) => { redirectUrl = url; return res; } };
+  await signupPost({ body: { captchaAnswer: 'no', captchaSig: 'bad', captchaTs: Date.now() } } as any, res);
+  assert.match(redirectUrl, /^\/signup\?err=/);
+});
