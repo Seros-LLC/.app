@@ -106,8 +106,17 @@ function openPg(): any {
     idle_timeout: Number(process.env.PGPOOL_IDLE_MS || 10000),
     connect_timeout: Number(process.env.PGPOOL_CONNECT_MS || 10000),
     transform: postgres.camel,
+    // Seros stores epoch milliseconds and bounded counters in BIGINT. They are
+    // deliberately exposed as JavaScript Numbers: passport/session data is JSON
+    // signed, and native BigInt cannot be JSON-serialized. The schema's values
+    // are well below Number.MAX_SAFE_INTEGER (dates and small counters).
     types: {
-      bigint: postgres.BigInt,
+      bigint: {
+        to: 20,
+        from: [20],
+        parse: (value: string) => Number(value),
+        serialize: (value: number) => String(value),
+      },
     },
   };
 

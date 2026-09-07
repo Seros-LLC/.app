@@ -190,6 +190,16 @@ test('signup creates a separate workspace owner and a signed-in session', async 
   }
 });
 
+test('signup can serialize a numeric password version from a Postgres-like driver', async () => {
+  // The production driver must normalize bigint timestamps before startSession
+  // JSON-signs them. This is the exact class of failure a SQLite-only test misses.
+  const { startSession } = require('../src/auth');
+  let cookie = '';
+  startSession({ setHeader: (_name: string, value: string) => { cookie = value; } } as any,
+    { workspaceId: 'ws', memberId: 'm', pv: Number(1788821657267n) });
+  assert.match(cookie, /seros_session=/);
+});
+
 test('a self-created owner can sign in by email after the signup session ends', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'seros-signup-login-'));
   const dbPath = join(dir, 'seros.db');

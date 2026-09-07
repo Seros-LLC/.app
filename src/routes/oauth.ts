@@ -8,13 +8,9 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as GitHubStrategy } from 'passport-github2';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
+import { accountForEmail, accountForOAuth } from '../db/system';
 import { startSession } from '../auth';
-import {
-  linkOAuth,
-  findMemberByOAuth,
-  findMemberByEmail,
-  getPasswordVersion,
-} from '../oauth';
+import { linkOAuth, getPasswordVersion } from '../oauth';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
 
@@ -38,29 +34,20 @@ export function configurePassport() {
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
-        const workspaceId = WS();
         const db = openDb();
-        const ws = await WorkspaceScope.open(db, workspaceId);
-
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || email || 'Google User';
+        // Provider identity/email resolution is the one tightly bounded global
+        // account lookup. Tenant rows are read only after opening this scope.
+        const account = (await accountForOAuth(db, 'google', profile.id))
+          ?? (email ? await accountForEmail(db, email) : null);
+        if (!account) return done(null, false);
+        const workspaceId = account.workspaceId;
+        const memberId = account.memberId;
+        const ws = await WorkspaceScope.open(db, workspaceId);
+        const member = await ws.member(memberId);
+        if (!member || member.status !== 'active') return done(null, false);
 
-        let memberId: string | null = null;
-
-        // Try to find existing member by provider
-        const existing = await findMemberByOAuth(ws, 'google', profile.id);
-        if (existing) {
-          memberId = existing.memberId;
-        } else if (email) {
-          // OAuth is a sign-in method, not an anonymous signup path. It may link
-          // only to a member an admin has already provisioned in this workspace.
-          const byEmail = await findMemberByEmail(ws, email);
-          memberId = byEmail?.memberId ?? (await ws.memberByEmail(email))?.members.id ?? null;
-        }
-        const member = memberId ? await ws.member(memberId) : undefined;
-        if (!memberId || !member || member.status !== 'active') return done(null, false);
-
-        // Link the OAuth provider
         await linkOAuth(ws, memberId, {
           provider: 'google',
           providerUserId: profile.id,
@@ -94,27 +81,18 @@ export function configurePassport() {
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
-        const workspaceId = WS();
         const db = openDb();
-        const ws = await WorkspaceScope.open(db, workspaceId);
-
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || profile.username || email || 'GitHub User';
+        const account = (await accountForOAuth(db, 'github', profile.id))
+          ?? (email ? await accountForEmail(db, email) : null);
+        if (!account) return done(null, false);
+        const workspaceId = account.workspaceId;
+        const memberId = account.memberId;
+        const ws = await WorkspaceScope.open(db, workspaceId);
+        const member = await ws.member(memberId);
+        if (!member || member.status !== 'active') return done(null, false);
 
-        let memberId: string | null = null;
-
-        // Try to find existing member by provider
-        const existing = await findMemberByOAuth(ws, 'github', profile.id);
-        if (existing) {
-          memberId = existing.memberId;
-        } else if (email) {
-          const byEmail = await findMemberByEmail(ws, email);
-          memberId = byEmail?.memberId ?? (await ws.memberByEmail(email))?.members.id ?? null;
-        }
-        const member = memberId ? await ws.member(memberId) : undefined;
-        if (!memberId || !member || member.status !== 'active') return done(null, false);
-
-        // Link the OAuth provider
         await linkOAuth(ws, memberId, {
           provider: 'github',
           providerUserId: profile.id,
