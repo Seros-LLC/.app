@@ -7,7 +7,7 @@ then write anything anywhere.
 > **The rule the whole codebase is built around:** nothing is written to a customer's
 > tracker without a recorded human confirmation. A `Task` row can only be created from a
 > `Confirmation` id — there is no function in this repository that creates one from a
-> draft. See [ADR 0002](../seros/product/docs/adr/0002-human-confirmation-is-mandatory.md).
+> draft. See [ADR 0002](https://github.com/Seros-LLC/seros/blob/main/docs/adr/0002-human-confirmation-is-mandatory.md).
 
 ## Run it
 
@@ -19,8 +19,9 @@ npm start                # web app on http://localhost:3000
 npm run worker           # background worker, in a second terminal
 ```
 
-Then open <http://localhost:3000/demo>, post a message, and watch it appear in the
-queue. Confirm it and it shows up under Tasks with the confirmation behind it.
+Then open <http://localhost:3000/login> and sign in with one of the credentials printed by
+`npm run seed`. The production app has no synthetic `/demo` route. To exercise the real
+loop, connect a Slack development workspace and select channels from the authenticated UI.
 
 | Command | What it does |
 |---|---|
@@ -35,6 +36,9 @@ queue. Confirm it and it shows up under Tasks with the confirmation behind it.
 | `npm run invite -- <memberId>` | creates a single-use password setup link from a host shell |
 | `npm run check:tenancy` | fails if any module reaches past `WorkspaceScope` |
 | `npm run verify` | typecheck, tenancy check, and the full suite |
+| `npm run sweep` | purges source content and old jobs past each workspace's retention window |
+| `npm run prune` | removes expired webhook replay nonces |
+| `npm run limits` | expires stale drafts and reports queue and draft caps |
 
 ## Deployment
 
