@@ -14,6 +14,7 @@ import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { page, esc } from '../views';
 import { csrfToken } from '../auth';
+import { pageCtx } from './queue';
 import { ask } from '../ai/ask';
 import type { AskResult } from '../ai/ask';
 import { capNote, QUESTION_MAX_CHARS, retrieve } from '../ai/retrieve';
@@ -133,7 +134,9 @@ export async function askPage(req: Request, res: Response) {
   const result: AskResult = {
     question: '', retrieved, meterId: null, modelCalled: false, outcome: { kind: 'no_question' },
   };
-  res.type('html').send(page('Ask', '/ask', render(result, csrfToken(s))));
+  // The same member/CSRF context Queue, Tasks, Members and Audit build. Without it
+  // a signed-in member saw "Sign in" here and lost their own sign-out control.
+  res.type('html').send(page('Ask', '/ask', render(result, csrfToken(s)), await pageCtx(req, scope)));
 }
 
 export async function askPost(req: Request, res: Response) {
@@ -155,5 +158,5 @@ export async function askPost(req: Request, res: Response) {
       outcome: { kind: 'degraded', why: 'provider_unavailable', providerOutcome: 'provider_error' },
     };
   }
-  res.type('html').send(page('Ask', '/ask', render(result, token)));
+  res.type('html').send(page('Ask', '/ask', render(result, token), await pageCtx(req, scope)));
 }

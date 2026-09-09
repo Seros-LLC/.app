@@ -18,6 +18,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type * as expressSession from 'express-session';
 import { openDb } from './db/client';
 import { MemberCredentials } from './password';
+import { errorPage } from './views';
 
 export const sessionSecret = () => {
   const s = process.env.SEROS_SESSION_SECRET;
@@ -178,13 +179,55 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
   next();
 }
 
+/**
+ * Where a refused request should be sent back to. A POST path is not a page, so
+ * the raw path is useless as a link; this is the GET page that owns each form.
+ * The result is one of these literals and never anything the caller sent, so a
+ * refusal cannot be turned into an open redirect or a reflected link.
+ */
+export function returnPathFor(req: Request): string {
+  const p = req.path ?? '';
+  if (p.startsWith('/connect')) return '/connect';
+  if (p.startsWith('/channels')) return '/channels';
+  if (p.startsWith('/members')) return '/members';
+  if (p.startsWith('/password')) return '/password';
+  if (p.startsWith('/ask')) return '/ask';
+  if (p.startsWith('/digest')) return '/digest';
+  if (p.startsWith('/tasks')) return '/tasks';
+  if (p.startsWith('/audit')) return '/audit';
+  if (p.startsWith('/signup')) return '/signup';
+  if (p.startsWith('/set-password')) return '/set-password';
+  if (p.startsWith('/login') || p.startsWith('/logout')) return '/login';
+  return '/queue';
+}
+
+/** Paths a visitor can reach without a session: they get the signed-out chrome. */
+const SIGNED_OUT = new Set(['/login', '/signup', '/set-password']);
+
 /** Every state-changing POST must carry a matching token and a same-origin referer. */
 export function requireCsrf(req: Request, res: Response, next: NextFunction) {
   const s = req.serosSession;
-  if (!s) return res.status(401).send('no session');
+  const back = returnPathFor(req);
+  if (!s) {
+    return res.status(401).type('html').send(errorPage(401,
+      'That request arrived without a session',
+      'Your sign-in has ended, so the change was not made. Sign in again and repeat it.',
+      { title: 'Signed out', actions: [{ href: '/login', label: 'Sign in', primary: true }], ctx: { chrome: 'auth' } }));
+  }
   if (!csrfOk(s, (req.body ?? {}).csrf)) {
     console.log(JSON.stringify({ level: 'warn', event: 'csrf.rejected', path: req.path }));
-    return res.status(403).send('bad csrf token');
+    return res.status(403).type('html').send(errorPage(403,
+      'That form was out of date, so nothing was changed',
+      'This happens when a page has been open for a long time or was submitted twice. Open the page again and resubmit it; your data is untouched.',
+      {
+        heading: 'That form could not be accepted',
+        title: 'Form expired',
+        active: back,
+        actions: [
+          { href: back, label: 'Reload the page and try again', primary: true },
+          { href: '/queue', label: 'Go to the queue' },
+        ],
+      }));
   }
   next();
 }
@@ -211,9 +254,33 @@ export function rateLimit(name: string, max: number, windowMs: number) {
     const b = buckets.get(key);
     if (!b || now > b.resetAt) { buckets.set(key, { n: 1, resetAt: now + windowMs }); return next(); }
     if (b.n >= max) {
-      res.setHeader('Retry-After', String(Math.ceil((b.resetAt - now) / 1000)));
+      const secs = Math.ceil((b.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(secs));
       console.log(JSON.stringify({ level: 'warn', event: 'ratelimit.blocked', bucket: name }));
-      return res.status(429).send('too many requests');
+      // The header already said when to retry; the page now says it too, because a
+      // person cannot read a response header.
+      const wait = secs <= 60
+        ? `${secs} second${secs === 1 ? '' : 's'}`
+        : `${Math.ceil(secs / 60)} minute${Math.ceil(secs / 60) === 1 ? '' : 's'}`;
+      const back = returnPathFor(req);
+      // A limiter in front of sign-in runs before there is any session, so the page
+      // uses the signed-out chrome rather than an application header the visitor
+      // cannot use yet.
+      const signedOut = SIGNED_OUT.has(back);
+      return res.status(429).type('html').send(errorPage(429,
+        'Too many requests in a short time, so this one was not carried out',
+        `Wait about ${wait}, then try again. This limit protects the workspace; nothing you sent was saved or lost.`,
+        {
+          title: 'Please wait',
+          active: signedOut ? '' : back,
+          ctx: signedOut ? { chrome: 'auth' } : {},
+          actions: signedOut
+            ? [{ href: back, label: back === '/signup' ? 'Back to sign up' : 'Back to sign in', primary: true }]
+            : [
+                { href: back, label: 'Back to the page', primary: true },
+                { href: '/queue', label: 'Go to the queue' },
+              ],
+        }));
     }
     b.n++;
     next();

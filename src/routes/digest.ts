@@ -14,6 +14,7 @@ import type { Request, Response } from 'express';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { page, esc } from '../views';
+import { pageCtx } from './queue';
 import { digest } from '../ai/digest';
 import type { DigestResult } from '../ai/digest';
 import { capNote, retrieve } from '../ai/retrieve';
@@ -103,5 +104,7 @@ export async function digestPage(req: Request, res: Response) {
       meterId: null, modelCalled: false, servedFromCache: false,
     };
   }
-  res.type('html').send(page('Digest', '/digest', renderDigest(result)));
+  // Same member/CSRF context as Queue and Tasks: a signed-in member keeps their
+  // name, role, password link and sign-out control on this page too.
+  res.type('html').send(page('Digest', '/digest', renderDigest(result), await pageCtx(req, scope)));
 }

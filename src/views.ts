@@ -331,6 +331,55 @@ export function notice(kind: NoticeKind, title: string, detail?: string, html?: 
     `</div></div>`;
 }
 
+/** A recovery action on an error page. `href` is a same-origin application path. */
+export interface ErrorAction { href: string; label: string; primary?: boolean }
+
+/**
+ * What each refusal is called, in the words of the person who hit it rather than
+ * the words of the status line. A status with no entry gets the neutral heading.
+ */
+const STATUS_HEADING: Record<number, string> = {
+  400: 'That form could not be read',
+  401: 'You are signed out',
+  403: 'That action was refused',
+  404: 'That item is not here',
+  409: 'Someone got there first',
+  429: 'Too many attempts',
+  500: 'Something went wrong',
+};
+
+/**
+ * The page a refused request gets. Before this, a refusal was a bare string -
+ * `bad csrf token`, `too many requests` - served with the right status and no way
+ * back: no header, no navigation, no statement of what to do next.
+ *
+ * `cause` is the one line naming what happened, `detail` says what to do about it.
+ * Both are escaped, so a caller may not smuggle markup or an internal error string
+ * into the page through them; callers pass their own sentence, never a provider
+ * message, a token or a reason code. The status is the caller's business and is
+ * unchanged by this function - it renders a body, nothing else.
+ */
+export function errorPage(
+  status: number,
+  cause: string,
+  detail: string,
+  opts: {
+    heading?: string; title?: string; active?: string;
+    actions?: ErrorAction[]; ctx?: PageContext; extra?: string;
+  } = {},
+): string {
+  const heading = opts.heading ?? STATUS_HEADING[status] ?? 'That request did not complete';
+  const actions = opts.actions?.length
+    ? opts.actions
+    : [{ href: '/queue', label: 'Return to the queue', primary: true }];
+  const body = `<h1>${esc(heading)}</h1>
+  ${notice('bad', cause, detail)}
+  ${opts.extra ?? ''}
+  <div class="row">${actions.map((a) =>
+    `<a class="button${a.primary ? ' primary' : ''}" href="${esc(a.href)}">${esc(a.label)}</a>`).join('')}</div>`;
+  return page(opts.title ?? heading, opts.active ?? '', body, opts.ctx ?? {});
+}
+
 /**
  * An empty state that names the next action instead of only reporting absence.
  * `action` is a caller-built fragment, already escaped.
