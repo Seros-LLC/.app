@@ -16,3 +16,6 @@ server.log
 *.bak
 *.backup
 *.backup[0-9]
+
+# Impeccable design-tool scratch state, not source of truth
+.impeccable/

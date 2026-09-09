@@ -8,7 +8,15 @@ import { DETECT_SYSTEM, draftSystem } from './prompts';
 import { explainDraft } from './ai/explain';
 import { TrackerService } from './tracker/service';
 
-const detectThreshold = () => {
+/**
+ * The confidence floor a detection must clear to become a draft.
+ *
+ * Exported because the seven-day replay (src/audit-replay.ts) must apply the
+ * SAME floor as the worker: a capture-rate number produced with a different
+ * threshold is not the number the product would have produced, and quoting it
+ * to a prospect would be quoting a different product.
+ */
+export const detectThreshold = () => {
   const raw = process.env.SEROS_DETECT_THRESHOLD;
   if (raw === undefined || raw === '') return 55;
   const n = Number(raw);

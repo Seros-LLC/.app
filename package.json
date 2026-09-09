@@ -14,6 +14,7 @@
     "sweep": "tsx src/sweep.ts",
     "prune": "tsx src/prune.ts",
     "limits": "tsx src/limits-cli.ts",
+    "replay:capture": "tsx src/audit-replay.ts",
     "auth": "tsx src/auth-cli.ts",
     "set-password": "tsx src/auth-cli.ts set-password",
     "invite": "tsx src/auth-cli.ts invite",

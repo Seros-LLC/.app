@@ -42,6 +42,7 @@ loop, connect a Slack development workspace and select channels from the authent
 | `npm run sweep` | purges source content and old jobs past each workspace's retention window |
 | `npm run prune` | removes expired webhook replay nonces |
 | `npm run limits` | expires stale drafts and reports queue and draft caps |
+| `npm run replay:capture -- <workspaceId> [--days N]` | read-only: replays the last N days (default 7) of the selected channels and reports how many commitments were missed. Writes no drafts, confirmations or tasks |
 
 ## Deployment
 
