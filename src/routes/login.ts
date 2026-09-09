@@ -522,6 +522,16 @@ export async function passwordChangePost(req: Request, res: Response) {
 
 const CAN_INVITE = new Set(['owner', 'admin']);
 
+/**
+ * An invite is useless as a bare path. The owner sees this string once and has to
+ * paste it into Slack or email, so it must be the whole absolute URL: a relative
+ * `/set-password?token=...` is easy to send and impossible for the invitee to open.
+ */
+function inviteUrl(req: Request, token: string): string {
+  const base = (process.env.SEROS_PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  return `${base}/set-password?token=${encodeURIComponent(token)}`;
+}
+
 export async function membersPage(req: Request, res: Response) {
   const s = req.serosSession!;
   const db = openDb();
@@ -538,7 +548,11 @@ export async function membersPage(req: Request, res: Response) {
   <p class="sub">Who can sign in, and whether they have a credential yet. No hashes, no tokens.</p>
   ${token ? `<div class="card"><p class="meta">Invite for ${esc(issuedFor)} — shown once, not stored, expires in
       ${esc(String(Math.round(inviteTtlMs() / 3_600_000)))}h</p>
-      <p><code>/set-password?token=${esc(token)}</code></p></div>` : ''}
+      <p><a href="${esc(inviteUrl(req, token))}">${esc(inviteUrl(req, token))}</a></p>
+      <label class="meta" for="invite-url">Copy the whole link — a partial one will not work</label>
+      <input id="invite-url" type="text" readonly size="60" value="${esc(inviteUrl(req, token))}"
+             aria-describedby="invite-note">
+      <p class="meta" id="invite-note">Select and copy this full link, then send it to ${esc(issuedFor)}. It is not shown again.</p></div>` : ''}
   <div class="tablewrap"><table>
     <tr><th>Member</th><th>Role</th><th>Status</th><th>Password</th><th>Locked</th>${mayInvite ? '<th></th>' : ''}</tr>
     ${rows.map((m) => `<tr>
