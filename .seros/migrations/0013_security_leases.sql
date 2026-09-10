@@ -1,0 +1,6 @@
+-- Security hardening: queue leases and tracker-write fencing.
+-- Re-run-safe because the SQLite migrator only applies schema additions after
+-- consulting pragma_table_info() in src/db/driver.ts.
+-- This file is intentionally a marker for the PostgreSQL mirror; SQLite columns
+-- are added by the guarded migration helper because SQLite lacks ADD COLUMN IF
+-- NOT EXISTS.

@@ -228,6 +228,18 @@ function migrateSqlite(dbPath: string): string[] {
     raw.exec("ALTER TABLE drafts ADD COLUMN expires_at INTEGER");
   }
 
+  // SQLite has no ADD COLUMN IF NOT EXISTS, while this migrator intentionally
+  // re-runs on every boot. Consult the catalogue before adding security columns.
+  const jobCols = raw.prepare("PRAGMA table_info(jobs)").all() as { name: string }[];
+  if (!jobCols.some((c) => c.name === "claimed_at")) {
+    raw.exec("ALTER TABLE jobs ADD COLUMN claimed_at INTEGER");
+  }
+  raw.exec("CREATE INDEX IF NOT EXISTS jobs_running_claimed_at ON jobs (status, claimed_at)");
+  const writeCols = raw.prepare("PRAGMA table_info(task_writes)").all() as { name: string }[];
+  if (!writeCols.some((c) => c.name === "claim_token")) {
+    raw.exec("ALTER TABLE task_writes ADD COLUMN claim_token TEXT");
+  }
+
   raw.close();
   return files;
 }

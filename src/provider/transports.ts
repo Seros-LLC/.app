@@ -147,9 +147,12 @@ async function callOpenAiCompatible(req: CompleteRequest, model: string, base: s
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), req.timeoutMs ?? Number(process.env.SEROS_TIMEOUT_MS || 20000));
   try {
+    // The deployment validator allowlists the configured origin. Never let an
+    // allowlisted endpoint bounce this request to another host: fetch follows
+    // redirects by default, which would make the allowlist an SSRF suggestion.
     const r = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST', signal: ctl.signal,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      method: 'POST', signal: ctl.signal, redirect: 'error',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
       body: JSON.stringify({
         model, temperature: 0, response_format: { type: 'json_object' },
         max_tokens: req.maxOutputTokens ?? 512,

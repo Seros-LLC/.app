@@ -210,6 +210,8 @@ export const taskWrites = sqliteTable('task_writes', {
   externalUrl: text('external_url'),
   attempts: integer('attempts').notNull().default(0),
   claimedAt: integer('claimed_at').notNull(),
+  /** Opaque fencing token: only the worker that owns it may finish or release. */
+  claimToken: text('claim_token'),
   completedAt: integer('completed_at'),
 }, (t)=>[
   primaryKey({columns:[t.workspaceId,t.taskId]}),
@@ -284,6 +286,8 @@ export const actionMeter = sqliteTable('action_meter', {
   payload: text('payload').notNull(),
   runAt: integer('run_at').notNull(),
   attempts: integer('attempts').notNull().default(0),
+  /** Set atomically on claim; never infer a lease from the queue's runAt. */
+  claimedAt: integer('claimed_at'),
   createdAt: integer('created_at').notNull(),
   }, (t)=>[
     primaryKey({columns:[t.workspaceId,t.id]})

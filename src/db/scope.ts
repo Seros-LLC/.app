@@ -361,52 +361,55 @@ export class WorkspaceScope {
    * holds a live claim. A claim older than `leaseMs` is taken over: a worker
    * that died mid-write must not block the write forever.
    */
-  async claimTaskWrite(taskId: string, leaseMs = 120_000): Promise<'claimed' | 'busy' | 'done'> {
+  async claimTaskWrite(taskId: string, leaseMs = 120_000): Promise<{ state: 'claimed'; token: string } | { state: 'busy' | 'done' }> {
     const now = Date.now();
+    const token = randomUUID();
     const inserted = await this.db.insert(taskWrites).values({
-      workspaceId: this.workspaceId, taskId, state: 'claimed', attempts: 1, claimedAt: now,
+      workspaceId: this.workspaceId, taskId, state: 'claimed', attempts: 1, claimedAt: now, claimToken: token,
     }).onConflictDoNothing();
-    if (affectedRows(inserted) !== 0) return 'claimed';
+    if (affectedRows(inserted) !== 0) return { state: 'claimed', token };
 
     const row = (await this.db.select().from(taskWrites).where(and(
       eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId))).limit(1))[0];
-    if (!row) return 'busy';                       // lost a race with a concurrent insert
-    if (row.state === 'done') return 'done';
-    if (now - row.claimedAt < leaseMs) return 'busy';
+    if (!row) return { state: 'busy' };            // lost a race with a concurrent insert
+    if (row.state === 'done') return { state: 'done' };
+    if (now - row.claimedAt < leaseMs) return { state: 'busy' };
 
-    // Expired lease. Conditional on the timestamp we read, so exactly one worker
-    // can take it over however many are trying.
+    // A fresh fencing token makes the old worker powerless after lease takeover.
     const taken = await this.db.update(taskWrites)
-      .set({ claimedAt: now, attempts: row.attempts + 1 })
+      .set({ claimedAt: now, attempts: row.attempts + 1, claimToken: token })
       .where(and(eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId),
                  eq(taskWrites.state, 'claimed'), eq(taskWrites.claimedAt, row.claimedAt)));
-    return affectedRows(taken) !== 0 ? 'claimed' : 'busy';
+    return affectedRows(taken) !== 0 ? { state: 'claimed', token } : { state: 'busy' };
   }
 
   /**
-   * The tracker answered with an id. Only now does the task claim to exist, and
-   * only from the 'queued' state, so a second completion cannot double-count.
+   * The tracker answered with an id. The fencing-token transition is the first
+   * mutation in one transaction: if this worker lost its lease, it changes zero
+   * rows and cannot mark the task created. The task and result then commit
+   * together, so no stale worker can leave a newer claim behind a created task.
    */
-  async completeTaskWrite(taskId: string, result: { tracker: string; externalId: string; externalUrl: string }): Promise<boolean> {
-    const res = await this.db.update(tasks)
-      // affectedRows(), not `res.changes`: node-postgres reports `rowCount` and
-      // reading the missing field would turn this check into "always true".
-      .set({ writeState: 'created' })
-      .where(and(eq(tasks.workspaceId, this.workspaceId), eq(tasks.id, taskId),
-                 eq(tasks.writeState, 'queued')));
-    const first = affectedRows(res) !== 0;
-    await this.db.update(taskWrites)
-      .set({ state: 'done', tracker: result.tracker, externalId: result.externalId,
-             externalUrl: result.externalUrl, completedAt: Date.now() })
-      .where(and(eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId)));
-    return first;
+  async completeTaskWrite(taskId: string, token: string, result: { tracker: string; externalId: string; externalUrl: string }): Promise<boolean> {
+    return withTx(this.db, async (tx) => {
+      const claim = await tx.update(taskWrites)
+        .set({ state: 'done', tracker: result.tracker, externalId: result.externalId,
+               externalUrl: result.externalUrl, completedAt: Date.now() })
+        .where(and(eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId),
+                   eq(taskWrites.state, 'claimed'), eq(taskWrites.claimToken, token)));
+      if (affectedRows(claim) === 0) return false;
+
+      const task = await tx.update(tasks).set({ writeState: 'created' })
+        .where(and(eq(tasks.workspaceId, this.workspaceId), eq(tasks.id, taskId), eq(tasks.writeState, 'queued')));
+      if (affectedRows(task) === 0) throw new Error('claimed task was not queued');
+      return true;
+    });
   }
 
-  /** The tracker call failed. Drop the claim so the retry can take it. */
-  async releaseTaskWrite(taskId: string): Promise<void> {
+  /** The tracker call failed. Only its current holder may drop the claim. */
+  async releaseTaskWrite(taskId: string, token: string): Promise<void> {
     await this.db.delete(taskWrites).where(and(
       eq(taskWrites.workspaceId, this.workspaceId), eq(taskWrites.taskId, taskId),
-      eq(taskWrites.state, 'claimed')));
+      eq(taskWrites.state, 'claimed'), eq(taskWrites.claimToken, token)));
   }
 
   /** The external issue this task became, if it has been written. */

@@ -8,7 +8,9 @@ const valid = {
   DATABASE_URL: 'postgresql://seros.invalid/example',
   SEROS_PROVIDER_CHAIN: 'http,ollama',
   SEROS_PROVIDER_BASE_URL: 'https://provider.invalid/v1',
+  SEROS_PROVIDER_ALLOWED_HOSTS: 'provider.invalid',
   SEROS_PROVIDER_API_KEY: 'provider-key-at-least-sixteen',
+  CRON_SECRET: 'cron-secret-at-least-sixteen',
 } as NodeJS.ProcessEnv;
 
 test('serverless config refuses missing or weak secrets', () => {
@@ -19,6 +21,21 @@ test('serverless config refuses missing or weak secrets', () => {
   assert.throws(
     () => validateServerlessEnvironment({ ...valid, SEROS_SIGNING_SECRET: 'short' }),
     /SEROS_SIGNING_SECRET/,
+  );
+  assert.throws(
+    () => validateServerlessEnvironment({ ...valid, CRON_SECRET: '' }),
+    /CRON_SECRET/,
+  );
+});
+
+test('serverless config rejects unapproved or insecure provider origins', () => {
+  assert.throws(
+    () => validateServerlessEnvironment({ ...valid, SEROS_PROVIDER_BASE_URL: 'http://127.0.0.1:11434', SEROS_PROVIDER_ALLOWED_HOSTS: '127.0.0.1' }),
+    /HTTPS/,
+  );
+  assert.throws(
+    () => validateServerlessEnvironment({ ...valid, SEROS_PROVIDER_BASE_URL: 'https://169.254.169.254/v1', SEROS_PROVIDER_ALLOWED_HOSTS: 'provider.invalid' }),
+    /ALLOWED_HOSTS/,
   );
 });
 

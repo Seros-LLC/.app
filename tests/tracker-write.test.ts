@@ -78,8 +78,9 @@ test('a failed tracker call leaves the task unwritten, and the retry delivers it
 
   let task = (await scope.recentTasks(10)).find((t: any) => t.id === taskId);
   assert.equal(task?.writeState, 'queued', 'a failed call never claims the task exists');
-  assert.equal(await scope.claimTaskWrite(taskId, 0), 'claimed', 'the claim was released for the retry');
-  await scope.releaseTaskWrite(taskId);
+  const retryClaim = await scope.claimTaskWrite(taskId, 0);
+  assert.equal(retryClaim.state, 'claimed', 'the claim was released for the retry');
+  if (retryClaim.state === 'claimed') await scope.releaseTaskWrite(taskId, retryClaim.token);
 
   // The real retry is the queue's backoff, which is deliberately in the future;
   // this is that same job, run now.
@@ -97,9 +98,11 @@ test('the claim stops a second worker writing the same task', async () => {
   TrackerService.reset(new FakeTrackerWriter());
 
   const { scope, taskId } = await seedConfirmedTask(db, 'ws-race');
-  assert.equal(await scope.claimTaskWrite(taskId), 'claimed');
-  assert.equal(await scope.claimTaskWrite(taskId), 'busy', 'a live claim is exclusive');
+  const first = await scope.claimTaskWrite(taskId);
+  assert.equal(first.state, 'claimed');
+  assert.equal((await scope.claimTaskWrite(taskId)).state, 'busy', 'a live claim is exclusive');
 
-  await scope.completeTaskWrite(taskId, { tracker: 'fake', externalId: 'X-1', externalUrl: 'https://tracker.invalid/X-1' });
-  assert.equal(await scope.claimTaskWrite(taskId), 'done', 'a finished write is never re-attempted');
+  if (first.state !== 'claimed') throw new Error('first claim should own a token');
+  await scope.completeTaskWrite(taskId, first.token, { tracker: 'fake', externalId: 'X-1', externalUrl: 'https://tracker.invalid/X-1' });
+  assert.equal((await scope.claimTaskWrite(taskId)).state, 'done', 'a finished write is never re-attempted');
 });

@@ -1,19 +1,20 @@
 // The only cross-tenant path: the queue poller. Reads identifiers, never content.
 import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from './client';
-import { dialect } from './client';
+import { dialect, affectedRows } from './client';
 import { jobs, workspaces, sourceConnections, members, memberCredentials, oauthProviders } from './schema';
 
 export type JobRow = typeof jobs.$inferSelect;
 
 /** Every column the claim returns, in the order the mapper below reads them. */
-const CLAIM_COLUMNS = sql`workspace_id, id, queue, status, payload, run_at, attempts, created_at`;
+const CLAIM_COLUMNS = sql`workspace_id, id, queue, status, payload, run_at, attempts, claimed_at, created_at`;
 
 function toJobRow(r: any): JobRow | null {
   if (!r) return null;
   return {
     workspaceId: r.workspace_id, id: r.id, queue: r.queue, status: r.status,
     payload: r.payload, runAt: Number(r.run_at), attempts: Number(r.attempts),
+    claimedAt: r.claimed_at == null ? null : Number(r.claimed_at),
     createdAt: Number(r.created_at),
   } as JobRow;
 }
@@ -36,7 +37,7 @@ function claimQuery(queues: string[], now: number) {
   const list = sql.join(queues.map((q) => sql`${q}`), sql`, `);
   const skipLocked = dialect() === 'pg' ? sql` FOR UPDATE SKIP LOCKED` : sql``;
   return sql`
-    UPDATE jobs SET status = 'running', attempts = attempts + 1
+    UPDATE jobs SET status = 'running', attempts = attempts + 1, claimed_at = ${now}
     WHERE (workspace_id, id) IN (
       SELECT workspace_id, id FROM jobs
       WHERE status = 'queued' AND run_at <= ${now} AND queue IN (${list})
@@ -53,12 +54,12 @@ function staleQuery(cutoff: number) {
       UPDATE jobs SET status = 'queued'
       WHERE (workspace_id, id) IN (
         SELECT workspace_id, id FROM jobs
-        WHERE status = 'running' AND run_at <= ${cutoff}${skipLocked}
+        WHERE status = 'running' AND (claimed_at IS NULL OR claimed_at <= ${cutoff})${skipLocked}
       )
       RETURNING id`
     : sql`
       UPDATE jobs SET status = 'queued'
-      WHERE status = 'running' AND run_at <= ${cutoff}
+      WHERE status = 'running' AND (claimed_at IS NULL OR claimed_at <= ${cutoff})
       RETURNING id`;
 }
 
@@ -91,31 +92,46 @@ export async function claimNextJobAsync(db: Db, queues: string[]): Promise<JobRo
   return toJobRow((rows as any[])[0]);
 }
 
-export function finishJob(db: Db, job: JobRow, status: 'done' | 'failed' | 'dead_letter' = 'done') {
-  assertSqliteSync('finishJob');
-  db.update(jobs).set({ status })
-    .where(and(eq(jobs.workspaceId, job.workspaceId), eq(jobs.id, job.id))).run();
+/**
+ * A claim is fenced by the timestamp written by claimQuery(). A reaper may return
+ * a dead worker's job to the queue and a successor may claim it before the old
+ * worker's promise settles. The old holder must then affect zero rows: otherwise
+ * it can mark the successor's work done or schedule its retry. `claimed_at` is
+ * the portable per-claim token available on both SQLite and Postgres.
+ */
+function claimedJob(job: JobRow) {
+  if (job.claimedAt == null) throw new Error('refusing to transition a job without a claim fence');
+  return and(
+    eq(jobs.workspaceId, job.workspaceId), eq(jobs.id, job.id),
+    eq(jobs.status, 'running'), eq(jobs.claimedAt, job.claimedAt),
+  );
 }
 
-export async function finishJobAsync(db: Db, job: JobRow, status: 'done' | 'failed' | 'dead_letter' = 'done') {
-  const q = db.update(jobs).set({ status })
-    .where(and(eq(jobs.workspaceId, job.workspaceId), eq(jobs.id, job.id)));
-  if (dialect() === 'pg') await (q as any); else q.run();
+export function finishJob(db: Db, job: JobRow, status: 'done' | 'failed' | 'dead_letter' = 'done'): boolean {
+  assertSqliteSync('finishJob');
+  return affectedRows(db.update(jobs).set({ status }).where(claimedJob(job)).run()) === 1;
+}
+
+export async function finishJobAsync(db: Db, job: JobRow, status: 'done' | 'failed' | 'dead_letter' = 'done'): Promise<boolean> {
+  const q = db.update(jobs).set({ status }).where(claimedJob(job));
+  const result = dialect() === 'pg' ? await (q as any) : q.run();
+  return affectedRows(result) === 1;
 }
 
 /** Bounded retry with backoff; dead-letter after maxAttempts. */
-export function retryJob(db: Db, job: JobRow, maxAttempts = 5) {
+export function retryJob(db: Db, job: JobRow, maxAttempts = 5): boolean {
   assertSqliteSync('retryJob');
   if (job.attempts >= maxAttempts) return finishJob(db, job, 'dead_letter');
-  db.update(jobs).set({ status: 'queued', runAt: Date.now() + backoffMs(job) })
-    .where(and(eq(jobs.workspaceId, job.workspaceId), eq(jobs.id, job.id))).run();
+  return affectedRows(db.update(jobs).set({ status: 'queued', runAt: Date.now() + backoffMs(job) })
+    .where(claimedJob(job)).run()) === 1;
 }
 
-export async function retryJobAsync(db: Db, job: JobRow, maxAttempts = 5) {
+export async function retryJobAsync(db: Db, job: JobRow, maxAttempts = 5): Promise<boolean> {
   if (job.attempts >= maxAttempts) return finishJobAsync(db, job, 'dead_letter');
   const q = db.update(jobs).set({ status: 'queued', runAt: Date.now() + backoffMs(job) })
-    .where(and(eq(jobs.workspaceId, job.workspaceId), eq(jobs.id, job.id)));
-  if (dialect() === 'pg') await (q as any); else q.run();
+    .where(claimedJob(job));
+  const result = dialect() === 'pg' ? await (q as any) : q.run();
+  return affectedRows(result) === 1;
 }
 
 function backoffMs(job: JobRow): number {
@@ -151,7 +167,15 @@ export async function reapStaleJobsAsync(db: Db, leaseMs = leaseDefault(), now =
   return reportReaped((rows as any[]).length);
 }
 
-function leaseDefault() { return Number(process.env.SEROS_JOB_LEASE_MS || 120_000); }
+function leaseDefault() {
+  const raw = process.env.SEROS_JOB_LEASE_MS;
+  if (raw === undefined || raw === '') return 120_000;
+  const leaseMs = Number(raw);
+  if (!Number.isFinite(leaseMs) || leaseMs <= 0 || leaseMs > 24 * 60 * 60 * 1000) {
+    throw new Error('SEROS_JOB_LEASE_MS must be a finite duration between 1ms and 24h');
+  }
+  return leaseMs;
+}
 
 function reportReaped(count: number): number {
   if (count) console.log(JSON.stringify({ level: 'warn', event: 'jobs.reaped', count }));

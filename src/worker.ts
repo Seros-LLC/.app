@@ -108,8 +108,8 @@ async function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: st
   if (job.task.writeState === 'created') return;                     // already in the tracker
 
   const claim = await scope.claimTaskWrite(job.task.id);
-  if (claim === 'done') return;                                      // another worker finished it
-  if (claim === 'busy') return;                                      // another worker is mid-write
+  if (claim.state !== 'claimed') return;                             // another worker owns or finished it
+  const claimToken = claim.token;                                    // fences an expired worker from its successor's claim
 
   const writer = TrackerService.getInstance().getWriter();
   let result;
@@ -132,12 +132,12 @@ async function handleTrackerWrite(db: ReturnType<typeof openDb>, workspaceId: st
   } catch (e) {
     // Drop the claim so the retry can take it, and leave write_state 'queued':
     // nothing in the system may claim this task exists in the tracker.
-    await scope.releaseTaskWrite(job.task.id);
+    await scope.releaseTaskWrite(job.task.id, claimToken);
     await scope.audit('task.write_failed', 'failed', { task_id: job.task.id, confirmation_id: confirmationId, tracker: writer.getName() });
     throw e;                                                         // retried with backoff
   }
 
-  const first = await scope.completeTaskWrite(job.task.id, result);
+  const first = await scope.completeTaskWrite(job.task.id, claimToken, result);
   if (!first) return;                                                // already accounted for
   await scope.audit('task.created', 'ok',
     { task_id: job.task.id, confirmation_id: confirmationId, idempotency_key: job.task.idempotencyKey,

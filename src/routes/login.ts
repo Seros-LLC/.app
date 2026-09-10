@@ -461,6 +461,13 @@ export async function passwordPage(req: Request, res: Response) {
            minlength="${esc(String(passwordMinLength()))}">
     <div class="row"><button class="primary" type="submit">${has ? 'Change password' : 'Set password'}</button></div>
   </form>
+  ${has && (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET || process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) ? `<section class="card"><h2>Sign-in providers</h2>
+    <p class="meta">Connect a provider while you are signed in. Seros never links an account just because provider email addresses match.</p>
+    <div class="row">
+      ${process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? `<form method="post" action="/auth/google/link"><input type="hidden" name="csrf" value="${esc(csrfToken(s))}"><button type="submit">Connect Google</button></form>` : ''}
+      ${process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? `<form method="post" action="/auth/github/link"><input type="hidden" name="csrf" value="${esc(csrfToken(s))}"><button type="submit">Connect GitHub</button></form>` : ''}
+    </div>
+  </section>` : ''}
   ${has ? '' : notice('info', 'Until you set one, an invite link is your only way in',
       'Invite links expire, so a password is what keeps the account reachable.')}`;
   res.type('html').send(page('Your password', '/password', body, await ctxFor(req, scope)));

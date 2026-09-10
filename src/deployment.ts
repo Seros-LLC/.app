@@ -20,6 +20,20 @@ const requireSecret = (env: NodeJS.ProcessEnv, name: string): void => {
  * never at startup. Refuse the deployment instead of shipping a queue that stays
  * empty for reasons no operator can see.
  */
+const requireHostedProviderUrl = (env: NodeJS.ProcessEnv): void => {
+  const raw = env.SEROS_PROVIDER_BASE_URL;
+  if (!raw) throw new Error('SEROS_PROVIDER_BASE_URL is required when the chain includes `http`');
+  let url: URL;
+  try { url = new URL(raw); } catch { throw new Error('SEROS_PROVIDER_BASE_URL must be an absolute HTTPS URL'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
+    throw new Error('SEROS_PROVIDER_BASE_URL must be HTTPS without credentials or fragments');
+  }
+  const allowed = (env.SEROS_PROVIDER_ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  if (!allowed.includes(url.hostname.toLowerCase())) {
+    throw new Error('SEROS_PROVIDER_BASE_URL host must appear in SEROS_PROVIDER_ALLOWED_HOSTS');
+  }
+};
+
 const requireUsableProvider = (env: NodeJS.ProcessEnv): void => {
   if (env.SEROS_PROVIDER === 'fake') {
     throw new Error('SEROS_PROVIDER=fake must never serve a deployment: it fabricates model output');
@@ -36,16 +50,16 @@ const requireUsableProvider = (env: NodeJS.ProcessEnv): void => {
       'draft would fail silently',
     );
   }
-  if (!env.SEROS_PROVIDER_BASE_URL || !env.SEROS_PROVIDER_API_KEY) {
-    throw new Error(
-      'SEROS_PROVIDER_BASE_URL and SEROS_PROVIDER_API_KEY are required when the chain includes `http`',
-    );
+  if (!env.SEROS_PROVIDER_API_KEY) {
+    throw new Error('SEROS_PROVIDER_API_KEY is required when the chain includes `http`');
   }
+  requireHostedProviderUrl(env);
 };
 
 export function validateServerlessEnvironment(env: NodeJS.ProcessEnv = process.env): void {
   requireSecret(env, 'SEROS_SESSION_SECRET');
   requireSecret(env, 'SEROS_SIGNING_SECRET');
+  requireSecret(env, 'CRON_SECRET');
   if (!isPgUrl(env.DATABASE_URL)) {
     throw new Error('DATABASE_URL must be a postgres:// or postgresql:// URL on Vercel');
   }

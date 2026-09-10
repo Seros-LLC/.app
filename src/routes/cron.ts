@@ -19,9 +19,8 @@ import { runMaintenance } from '../limits';
 const cronSecret = () => process.env.CRON_SECRET || '';
 
 function authorised(req: Request): boolean {
-  // Vercel signs its own cron invocations with this header.
-  const vercelCron = req.header('x-vercel-cron');
-  if (vercelCron) return true;
+  // `x-vercel-cron` is a routing hint, not proof of origin: any HTTP client can
+  // send it. Vercel Cron supplies the configured CRON_SECRET as Bearer auth.
   const secret = cronSecret();
   if (!secret) return false;                       // unset means closed, not open
   const given = req.header('authorization') || '';

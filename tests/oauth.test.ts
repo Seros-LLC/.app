@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { oauthCallback, oauthStart } from '../src/routes/oauth';
+import { oauthCallback, oauthLinkStart, oauthStart } from '../src/routes/oauth';
 
 const ROOT = join(__dirname, '..');
 const TSC = join(ROOT, 'node_modules', '.bin', 'tsc');
@@ -81,6 +81,13 @@ test('an unconfigured OAuth provider fails closed before Passport', () => {
     if (previousSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
     else process.env.GOOGLE_CLIENT_SECRET = previousSecret;
   }
+});
+
+test('OAuth linking refuses to create an intent without an authenticated Seros session', () => {
+  let redirect: { code: number; url: string } | null = null;
+  const res: any = { redirect: (code: number, url: string) => { redirect = { code, url }; return res; } };
+  oauthLinkStart('google')({ session: {} } as any, res, (() => { throw new Error('next must not be called'); }) as any);
+  assert.deepEqual(redirect, { code: 303, url: '/login' });
 });
 
 test('OAuth callback without a provider fails closed before Passport', async () => {

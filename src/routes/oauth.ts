@@ -8,8 +8,22 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as GitHubStrategy } from 'passport-github2';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
-import { accountForEmail, accountForOAuth } from '../db/system';
+import { accountForOAuth } from '../db/system';
 import { startSession } from '../auth';
+
+const LINK_INTENT_TTL_MS = 10 * 60 * 1000;
+type OAuthProvider = 'google' | 'github';
+type LinkIntent = { provider: OAuthProvider; workspaceId: string; memberId: string; expiresAt: number };
+
+function linkIntent(req: Request, provider: OAuthProvider): LinkIntent | null {
+  const intent = (req.session as any)?.serosOAuthLink as LinkIntent | undefined;
+  if (!intent || intent.provider !== provider || intent.expiresAt < Date.now()) return null;
+  return intent;
+}
+
+function clearLinkIntent(req: Request) {
+  if (req.session) delete (req.session as any).serosOAuthLink;
+}
 import { linkOAuth, getPasswordVersion } from '../oauth';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
@@ -37,10 +51,15 @@ export function configurePassport() {
         const db = openDb();
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || email || 'Google User';
-        // Provider identity/email resolution is the one tightly bounded global
-        // account lookup. Tenant rows are read only after opening this scope.
-        const account = (await accountForOAuth(db, 'google', profile.id))
-          ?? (email ? await accountForEmail(db, email) : null);
+        // Only an immutable provider subject that was linked by an authenticated
+        // account owner may sign in. A short-lived link intent is created only by
+        // POST /auth/:provider/link after Seros session + CSRF validation; email
+        // is profile data, never account proof.
+        const existing = await accountForOAuth(db, 'google', profile.id);
+        const intent = linkIntent(_req, 'google');
+        clearLinkIntent(_req); // single-use whether linking succeeds or not
+        if (intent && existing && (existing.workspaceId !== intent.workspaceId || existing.memberId !== intent.memberId)) return done(null, false);
+        const account = existing ?? intent;
         if (!account) return done(null, false);
         const workspaceId = account.workspaceId;
         const memberId = account.memberId;
@@ -84,8 +103,14 @@ export function configurePassport() {
         const db = openDb();
         const email = profile.emails?.[0]?.value?.toLowerCase() || null;
         const name = profile.displayName || profile.username || email || 'GitHub User';
-        const account = (await accountForOAuth(db, 'github', profile.id))
-          ?? (email ? await accountForEmail(db, email) : null);
+        // Never treat a provider email as proof of an existing Seros account.
+        // A valid, single-use linking intent proves the Seros account owner chose
+        // this provider identity during an authenticated linking flow.
+        const existing = await accountForOAuth(db, 'github', profile.id);
+        const intent = linkIntent(_req, 'github');
+        clearLinkIntent(_req);
+        if (intent && existing && (existing.workspaceId !== intent.workspaceId || existing.memberId !== intent.memberId)) return done(null, false);
+        const account = existing ?? intent;
         if (!account) return done(null, false);
         const workspaceId = account.workspaceId;
         const memberId = account.memberId;
@@ -116,7 +141,7 @@ export function configurePassport() {
   }
 }
 
-export function oauthStart(provider: 'google' | 'github') {
+export function oauthStart(provider: OAuthProvider) {
   return (req: Request, res: Response, next: NextFunction) => {
     const prefix = provider === 'google' ? 'GOOGLE' : 'GITHUB';
     if (!process.env[`${prefix}_CLIENT_ID`] || !process.env[`${prefix}_CLIENT_SECRET`]) {
@@ -125,6 +150,24 @@ export function oauthStart(provider: 'google' | 'github') {
     const scope = provider === 'google' ? ['profile', 'email'] : ['user:email'];
     // The callback creates a session. Require Passport's signed OAuth state value
     // so a cross-site request cannot bind an attacker's provider account to it.
+    return passport.authenticate(provider, { scope, state: {} })(req, res, next);
+  };
+}
+
+/** Begin a provider-link flow for the already authenticated Seros account. */
+export function oauthLinkStart(provider: OAuthProvider) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const s = req.serosSession;
+    if (!s) return res.redirect(303, '/login');
+    const prefix = provider === 'google' ? 'GOOGLE' : 'GITHUB';
+    if (!process.env[`${prefix}_CLIENT_ID`] || !process.env[`${prefix}_CLIENT_SECRET`]) {
+      return res.redirect(303, `/password?err=${provider}_not_configured`);
+    }
+    (req.session as any).serosOAuthLink = {
+      provider, workspaceId: s.workspaceId, memberId: s.memberId,
+      expiresAt: Date.now() + LINK_INTENT_TTL_MS,
+    } satisfies LinkIntent;
+    const scope = provider === 'google' ? ['profile', 'email'] : ['user:email'];
     return passport.authenticate(provider, { scope, state: {} })(req, res, next);
   };
 }

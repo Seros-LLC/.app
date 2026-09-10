@@ -13,7 +13,7 @@ import {
 import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
 import { cronDrain } from './routes/cron';
 import { page, empty, notice } from './views';
-import { configurePassport, oauthCallback, oauthError, oauthStart } from './routes/oauth';
+import { configurePassport, oauthCallback, oauthError, oauthLinkStart, oauthStart } from './routes/oauth';
 import { connectPage, connectStart, connectCallback, disconnect, channelsPage, channelsSave } from './routes/connect';
 import passport from 'passport';
 import session from 'express-session';
@@ -117,6 +117,11 @@ export function createApp() {
   app.get('/audit', auditPage);
   app.get('/password', passwordPage);
   app.post('/password', rateLimit('password', 20, 60_000), requireCsrf, passwordChangePost);
+  // Linking an OAuth identity is a state-changing action. It begins only after
+  // the signed Seros session and CSRF token are verified; the callback consumes
+  // its short-lived Passport-session intent.
+  app.post('/auth/google/link', requireCsrf, oauthLinkStart('google'));
+  app.post('/auth/github/link', requireCsrf, oauthLinkStart('github'));
   app.get('/members', membersPage);
   app.get('/connect', asyncHandler(connectPage));
   app.post('/connect/slack', rateLimit('connect', 20, 60_000), requireCsrf, asyncHandler(connectStart));
