@@ -16,19 +16,10 @@ import { page, empty, notice } from './views';
 import { configurePassport, oauthCallback, oauthError, oauthLinkStart, oauthStart } from './routes/oauth';
 import { connectPage, connectStart, connectCallback, disconnect, channelsPage, channelsSave } from './routes/connect';
 import passport from 'passport';
-import session from 'express-session';
 import { WorkspaceScope } from './db/scope';
 
 
 const PORT = Number(process.env.PORT || 3000);
-
-// OAuth's authorization response returns from accounts.google.com by a top-level GET.
-// Lax preserves Passport's state cookie for that callback; Strict would silently drop it.
-export const oauthSessionCookie = {
-  httpOnly: true,
-  sameSite: 'lax' as const,
-  secure: 'auto' as const,
-};
 
 export function createApp() {
   const app = express();
@@ -37,40 +28,21 @@ export function createApp() {
   // Passport OAuth middleware
   configurePassport();
 
-  // Passport session serialization
-  passport.serializeUser((user: any, done: any) => {
-    done(null, { memberId: user.memberId, workspaceId: user.workspaceId });
-  });
+  // No express-session. Passport is used only to run the OAuth handshake; the
+  // signed-in identity is carried by the app's own signed cookie (src/auth.ts)
+  // and the OAuth state by another (src/oauth-state.ts). An express-session
+  // MemoryStore would keep that state in one lambda instance's heap, so the
+  // instance receiving the provider callback usually would not find it and every
+  // OAuth sign-in would fail closed. Nothing here needs serializeUser, because
+  // no login is ever persisted into a Passport session.
+  // Fail closed here, at construction, exactly as the removed express-session
+  // wiring used to as a side effect of calling sessionSecret(). Every signed
+  // cookie the app issues - the session (src/auth.ts) and the OAuth state
+  // (src/oauth-state.ts) - is signed with this secret, and a missing or short
+  // one must stop the process rather than surface later as a per-request 500.
+  sessionSecret();
 
-  passport.deserializeUser(async (obj: any, done: any) => {
-    try {
-      const db = openDb();
-      const scope = await WorkspaceScope.open(db, obj.workspaceId);
-      const member = await scope.member(obj.memberId);
-      if (!member || member.status !== 'active') {
-        return done(null, false);
-      }
-      done(null, { memberId: obj.memberId, workspaceId: obj.workspaceId });
-    } catch (err) {
-      done(err);
-    }
-  });
   app.use(passport.initialize());
-  // Passport's session() needs a real req.session to deserialize into; the app's
-  // own signed-cookie session (src/auth.ts) is separate and lives below OAuth.
-  app.use(session({
-    // sessionSecret() throws when SEROS_SESSION_SECRET is unset or under 16 chars,
-    // which is the point. This used to fall back to a hard-coded literal, so an
-    // unset env var in production left every session cookie signed with a string
-    // committed to this repo: anyone reading it could mint a valid session for any
-    // workspace. The app's own cookie (src/auth.ts) already failed closed here and
-    // the webhook secret does too — this bridge was the one that did not.
-    secret: sessionSecret(),
-    resave: false,
-    saveUninitialized: false,
-    cookie: oauthSessionCookie,
-  }));
-  app.use(passport.session());
 
   app.set('trust proxy', 1);
 

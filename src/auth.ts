@@ -15,7 +15,6 @@
  */
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import type * as expressSession from 'express-session';
 import { openDb } from './db/client';
 import { MemberCredentials } from './password';
 import { admitRateLimit } from './security-controls';

@@ -9,20 +9,32 @@ import { Strategy as GitHubStrategy } from 'passport-github2';
 import { openDb } from '../db/client';
 import { WorkspaceScope } from '../db/scope';
 import { accountForOAuth } from '../db/system';
-import { startSession } from '../auth';
+import { startSession, readCookie } from '../auth';
+import { CookieStateStore, sealValue, unsealValue, setFlowCookie, clearFlowCookie } from '../oauth-state';
 
 const LINK_INTENT_TTL_MS = 10 * 60 * 1000;
 type OAuthProvider = 'google' | 'github';
 type LinkIntent = { provider: OAuthProvider; workspaceId: string; memberId: string; expiresAt: number };
 
+const LINK_INTENT_COOKIE = 'seros_oauth_link';
+const LINK_PURPOSE = 'oauth-link-intent';
+
+/**
+ * The intent rides in a signed cookie rather than `req.session` for the same
+ * reason the OAuth state does (see src/oauth-state.ts): the serverless instance
+ * that serves the provider callback is usually not the one that started the
+ * flow, so an in-memory session is not there to read. The signature is over
+ * SEROS_SESSION_SECRET, so a caller cannot forge an intent for another account.
+ */
 function linkIntent(req: Request, provider: OAuthProvider): LinkIntent | null {
-  const intent = (req.session as any)?.serosOAuthLink as LinkIntent | undefined;
+  const intent = unsealValue<LinkIntent>(LINK_PURPOSE, readCookie(req, LINK_INTENT_COOKIE));
   if (!intent || intent.provider !== provider || intent.expiresAt < Date.now()) return null;
   return intent;
 }
 
 function clearLinkIntent(req: Request) {
-  if (req.session) delete (req.session as any).serosOAuthLink;
+  const res = (req as any).res as Response | undefined;
+  if (res) clearFlowCookie(res, LINK_INTENT_COOKIE);
 }
 import { linkOAuth, getPasswordVersion } from '../oauth';
 
@@ -42,9 +54,10 @@ export function configurePassport() {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: googleCallback,
-      // State is configured on the strategy, not only at authenticate() time:
-      // otherwise passport-oauth2 installs a NullStore and sends no state value.
-      state: true,
+      // State is verified against a signed cookie, not `req.session`: production
+      // is serverless, so the instance handling the callback is usually not the
+      // one that issued the state. A `store` overrides the `state: true` default.
+      store: new CookieStateStore('google') as any,
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
@@ -96,7 +109,8 @@ export function configurePassport() {
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
       callbackURL: githubCallback,
       scope: ['user:email'],
-      state: true,
+      // See the Google strategy above: signed-cookie state, not session state.
+      store: new CookieStateStore('github') as any,
       passReqToCallback: true,
     }, async (_req: Request, _accessToken: string, _refreshToken: string, profile: any, done: any) => {
       try {
@@ -163,10 +177,12 @@ export function oauthLinkStart(provider: OAuthProvider) {
     if (!process.env[`${prefix}_CLIENT_ID`] || !process.env[`${prefix}_CLIENT_SECRET`]) {
       return res.redirect(303, `/password?err=${provider}_not_configured`);
     }
-    (req.session as any).serosOAuthLink = {
-      provider, workspaceId: s.workspaceId, memberId: s.memberId,
-      expiresAt: Date.now() + LINK_INTENT_TTL_MS,
-    } satisfies LinkIntent;
+    (req as any).res && setFlowCookie((req as any).res as Response, LINK_INTENT_COOKIE,
+      sealValue(LINK_PURPOSE, {
+        provider, workspaceId: s.workspaceId, memberId: s.memberId,
+        expiresAt: Date.now() + LINK_INTENT_TTL_MS,
+      } satisfies LinkIntent, LINK_INTENT_TTL_MS),
+      LINK_INTENT_TTL_MS);
     const scope = provider === 'google' ? ['profile', 'email'] : ['user:email'];
     return passport.authenticate(provider, { scope, state: {} })(req, res, next);
   };
@@ -191,17 +207,15 @@ export async function oauthCallback(req: any, res: Response, next: NextFunction)
     return res.redirect(303, `/login?err=${provider}_not_configured`);
   }
 
-  passport.authenticate(provider, (err: any, user: any) => {
+  // `session: false`: there is no Passport session to write into, and asking for
+  // one would throw now that express-session is gone. The verify callback has
+  // already established who this is; the app's own signed cookie is issued below.
+  (passport.authenticate as any)(provider, { session: false }, ((err: any, user: any) => {
     if (err || !user) {
       return res.redirect(303, '/login?err=oauth_failed');
     }
 
-    req.logIn(user, async (loginErr: any) => {
-      if (loginErr) {
-        console.error(JSON.stringify({ level: 'error', event: 'oauth.login.failed', error: String(loginErr) }));
-        return res.redirect(303, '/login?err=oauth_failed');
-      }
-
+    void (async () => {
       try {
         const db = openDb();
         const scope = await WorkspaceScope.open(db, user.workspaceId);
@@ -222,8 +236,8 @@ export async function oauthCallback(req: any, res: Response, next: NextFunction)
         console.error(JSON.stringify({ level: 'error', event: 'oauth.callback.failed', error: String(err) }));
         return res.redirect(303, '/login?err=oauth_failed');
       }
-    });
-  })(req, res, next);
+    })();
+  }) as any)(req, res, next);
 }
 
 /**
