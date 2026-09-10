@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Db } from './db/client';
-import { dialect } from './db/client';
+import { dialect, resultRows } from './db/client';
 import { sessionSecret } from './auth';
 
 export function subjectHash(bucket: string, subject: string): string {
@@ -16,6 +16,6 @@ export async function admitRateLimit(db: Db, bucket: string, subject: string, ma
     ON CONFLICT(bucket, subject_hash, window_start) DO UPDATE SET hits = rate_limit_windows.hits + 1
       WHERE rate_limit_windows.hits < ${max}
     RETURNING hits`;
-  const rows = dialect() === 'pg' ? (await (db as any).execute(q)).rows : db.all(q);
+  const rows = dialect() === 'pg' ? resultRows(await (db as any).execute(q)) : db.all(q);
   return { admitted: (rows as any[]).length === 1, resetAt: windowStart + windowMs };
 }

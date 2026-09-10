@@ -14,6 +14,7 @@ export {
   isPgUrl, 
   applyPgMigrations, 
   affectedRows,
+  resultRows,
   migrationFiles, 
   migrationsDir, 
   pgClientOptions 

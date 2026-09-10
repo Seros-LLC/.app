@@ -22,7 +22,9 @@
     "eval": "tsx evals/detection.ts",
     "check:tenancy": "tsx tools/check-tenancy.ts",
     "test": "SEROS_PROVIDER=fake SEROS_TRACKER=fake tsx --test tests/*.test.ts",
-    "verify": "npm run typecheck && npm run check:tenancy && npm test"
+    "test:pg": "./tools/pg-test.sh",
+    "verify": "npm run typecheck && npm run check:tenancy && npm test",
+    "verify:pg": "npm run verify && npm run test:pg"
   },
   "dependencies": {
     "@types/better-sqlite3": "^9.6.0",

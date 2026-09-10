@@ -48,14 +48,40 @@ const dbFile = () => {
 
 /**
  * How many rows a write touched, on either driver. better-sqlite3 answers with
- * `{ changes }`, node-postgres with a Result carrying `rowCount`; a conditional
- * update ("only if it is still queued") is a correctness check in this codebase,
- * so reading the wrong field silently turns it into "always true".
+ * `{ changes }`, node-postgres with a Result carrying `rowCount`, and drizzle's
+ * postgres-js driver with a Result carrying `count`. A conditional update
+ * ("only if it is still queued", "only if I still hold the lease") is a
+ * correctness check in this codebase, so reading the wrong field silently turns
+ * a successful claim into a reported failure — the job is left running while its
+ * worker believes it lost the race.
  */
 export function affectedRows(result: unknown): number {
-  const r = result as { changes?: number; rowCount?: number } | null | undefined;
+  const r = result as { changes?: number; rowCount?: number; count?: number } | null | undefined;
   if (!r) return 0;
-  return Number(r.changes ?? r.rowCount ?? 0);
+  return Number(r.changes ?? r.rowCount ?? r.count ?? 0);
+}
+
+/**
+ * The rows a RETURNING query produced, on either driver.
+ *
+ * There is no shared result shape here and the difference is silent. Drizzle's
+ * postgres-js driver returns the postgres-js Result — an Array subclass — from
+ * `db.execute(sql\`...\`)`, so it has NO `.rows` property; node-postgres returns
+ * `{ rows }`. Reading `.rows` off the former yields `undefined`, and the
+ * `.length` or `[0]` that always follows throws a TypeError at runtime.
+ *
+ * That is not a cosmetic difference: every caller here uses row COUNT as the
+ * verdict of a conditional write ("did this claim/spend/admission succeed?"),
+ * so getting it wrong turns a security control or a queue claim into a crash on
+ * Postgres — which is the only dialect production runs. The SQLite suite cannot
+ * catch it because SQLite never takes this branch; tests/pg-dialect.test.ts
+ * exists for exactly that reason.
+ */
+export function resultRows(result: unknown): any[] {
+  if (!result) return [];
+  if (Array.isArray(result)) return result;                    // postgres-js Result
+  const rows = (result as { rows?: unknown }).rows;            // node-postgres shape
+  return Array.isArray(rows) ? rows : [];
 }
 
 /** True for exactly the two URL schemes postgres-js accepts. */

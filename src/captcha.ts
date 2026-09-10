@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Db } from './db/client';
-import { dialect } from './db/client';
+import { dialect, resultRows } from './db/client';
 import { sessionSecret } from './auth';
 
 export type CaptchaPurpose = 'login' | 'signup';
@@ -49,6 +49,6 @@ export async function consumeCaptcha(db: Db, id: string, submitted: string, purp
     WHERE id = ${id} AND purpose = ${purpose} AND answer_mac = ${answer(id, submitted)}
       AND subject_hash = ${subject(ip)} AND used_at IS NULL AND expires_at > ${now}
     RETURNING id`;
-  const rows = dialect() === 'pg' ? (await (db as any).execute(q)).rows : db.all(q);
+  const rows = dialect() === 'pg' ? resultRows(await (db as any).execute(q)) : db.all(q);
   return (rows as any[]).length === 1;
 }

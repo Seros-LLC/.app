@@ -1,7 +1,7 @@
 // The only cross-tenant path: the queue poller. Reads identifiers, never content.
 import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from './client';
-import { dialect, affectedRows } from './client';
+import { dialect, affectedRows, resultRows } from './client';
 import { jobs, workspaces, sourceConnections, members, memberCredentials, oauthProviders } from './schema';
 
 export type JobRow = typeof jobs.$inferSelect;
@@ -9,13 +9,33 @@ export type JobRow = typeof jobs.$inferSelect;
 /** Every column the claim returns, in the order the mapper below reads them. */
 const CLAIM_COLUMNS = sql`workspace_id, id, queue, status, payload, run_at, attempts, claimed_at, created_at`;
 
+/**
+ * A claimed row, from either driver.
+ *
+ * The two drivers disagree on key casing for a RAW query, and the disagreement is
+ * silent. better-sqlite3 hands back the column names as written
+ * (`workspace_id`); postgres-js is opened with `transform: postgres.camel` in
+ * driver.ts, so the same RETURNING clause arrives as `workspaceId`. Reading only
+ * snake_case therefore yields `undefined` for every field on Postgres — and a
+ * job whose `claimedAt` is undefined cannot be fenced, finished, or retried, so
+ * it stays `running` until the reaper takes it and the confirmed write behind it
+ * never happens.
+ *
+ * Accepting both spellings keeps the mapper honest on both drivers. It is the
+ * only place raw column names cross into the typed world.
+ */
 function toJobRow(r: any): JobRow | null {
   if (!r) return null;
+  const pick = <T>(snake: string, camel: string): T => (r[snake] ?? r[camel]) as T;
+  const num = (snake: string, camel: string): number => Number(pick<unknown>(snake, camel));
+  const claimedAt = pick<unknown>('claimed_at', 'claimedAt');
   return {
-    workspaceId: r.workspace_id, id: r.id, queue: r.queue, status: r.status,
-    payload: r.payload, runAt: Number(r.run_at), attempts: Number(r.attempts),
-    claimedAt: r.claimed_at == null ? null : Number(r.claimed_at),
-    createdAt: Number(r.created_at),
+    workspaceId: pick<string>('workspace_id', 'workspaceId'),
+    id: r.id, queue: r.queue, status: r.status, payload: r.payload,
+    runAt: num('run_at', 'runAt'),
+    attempts: num('attempts', 'attempts'),
+    claimedAt: claimedAt == null ? null : Number(claimedAt),
+    createdAt: num('created_at', 'createdAt'),
   } as JobRow;
 }
 
@@ -88,7 +108,7 @@ export function claimNextJob(db: Db, queues: string[]): JobRow | null {
 /** The same claim, on either dialect. */
 export async function claimNextJobAsync(db: Db, queues: string[]): Promise<JobRow | null> {
   const q = claimQuery(queues, Date.now());
-  const rows = dialect() === 'pg' ? (await (db as any).execute(q)).rows : db.all(q);
+  const rows = dialect() === 'pg' ? resultRows(await (db as any).execute(q)) : db.all(q);
   return toJobRow((rows as any[])[0]);
 }
 
@@ -163,7 +183,7 @@ export function reapStaleJobs(db: Db, leaseMs = leaseDefault(), now = Date.now()
 
 export async function reapStaleJobsAsync(db: Db, leaseMs = leaseDefault(), now = Date.now()): Promise<number> {
   const q = staleQuery(now - leaseMs);
-  const rows = dialect() === 'pg' ? (await (db as any).execute(q)).rows : db.all(q);
+  const rows = dialect() === 'pg' ? resultRows(await (db as any).execute(q)) : db.all(q);
   return reportReaped((rows as any[]).length);
 }
 
