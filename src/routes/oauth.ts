@@ -210,8 +210,19 @@ export async function oauthCallback(req: any, res: Response, next: NextFunction)
   // `session: false`: there is no Passport session to write into, and asking for
   // one would throw now that express-session is gone. The verify callback has
   // already established who this is; the app's own signed cookie is issued below.
-  (passport.authenticate as any)(provider, { session: false }, ((err: any, user: any) => {
+  (passport.authenticate as any)(provider, { session: false }, ((err: any, user: any, info: any) => {
     if (err || !user) {
+      // This branch was silent, which is why a total OAuth outage looked like
+      // ordinary user error in the logs. `info` carries the state store's
+      // message, so a rejected nonce is distinguishable from a provider or
+      // token-exchange failure without reproducing it by hand.
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'oauth.callback.rejected',
+        provider,
+        reason: err ? 'strategy_error' : 'no_user',
+        detail: String(err?.message ?? (typeof info === 'string' ? info : info?.message) ?? 'unknown'),
+      }));
       return res.redirect(303, '/login?err=oauth_failed');
     }
 
