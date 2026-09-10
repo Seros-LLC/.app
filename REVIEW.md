@@ -1,5 +1,12 @@
 # Seros app — defect review
 
+> **STALE — historical record, not current state.**
+> This describes the tree of 2026-08-18 at a 25-test baseline, under old paths
+> (`/home/user/...`). As of 2026-09-09 the suite is 176/176 green.
+> Criticals C1 (no authentication) and C2 (double-fire) are CLOSED: session
+> middleware and CSRF are wired in `src/server.ts`, and the atomic claim lives in
+> `src/db/system.ts`. Do not cite this file as the current security posture.
+
 Reviewed: `/home/user/seros-app` @ 2026-08-18, against
 `/home/user/seros/product/docs/IMPLEMENTATION-BRIEF.md` and ADR 0002.
 Baseline: `npm test` = 25/25 pass, `npm run typecheck` = clean, `SEROS_PROVIDER=fake npm run eval`
