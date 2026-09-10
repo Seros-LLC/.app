@@ -7,8 +7,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createApp } from '../src/server';
-import { generateCaptcha } from '../src/captcha';
-import { migrateDb } from '../src/db/client';
+import { issueCaptcha } from '../src/captcha';
+import { migrateDb, openDb } from '../src/db/client';
 import { WorkspaceScope } from '../src/db/scope';
 
 process.env.SEROS_SESSION_SECRET = 'test-session-secret-for-login-123456';
@@ -17,9 +17,10 @@ test('loginPage is render-only and does not publish a fixed owner credential', a
   const app = createApp();
   void app;
   const dir = mkdtempSync(join(tmpdir(), 'seros-login-page-'));
-  const dbPath = join(dir, 'must-not-be-created.db');
+  const dbPath = join(dir, 'seros.db');
   const previous = process.env.SEROS_DB;
   process.env.SEROS_DB = dbPath;
+  migrateDb(dbPath);
   // Express response mock
   let html = '';
   const res: any = {
@@ -29,7 +30,7 @@ test('loginPage is render-only and does not publish a fixed owner credential', a
 
   const { loginPage } = require('../src/routes/login');
   try {
-    await loginPage({ query: {} } as any, res);
+    await loginPage({ query: {}, ip: '127.0.0.1' } as any, res);
   } finally {
     if (previous === undefined) delete process.env.SEROS_DB;
     else process.env.SEROS_DB = previous;
@@ -41,11 +42,18 @@ test('loginPage is render-only and does not publish a fixed owner credential', a
   assert.ok(html.includes('Sign in with GitHub'));
   assert.ok(!html.includes('admin@seros.dev'));
   assert.ok(!html.includes('password123'));
-  assert.equal(existsSync(dbPath), false, 'GET /login must not even open the database');
+  // The durable CAPTCHA records each issued challenge, so the sign-in page now
+  // provisions its database rather than rendering from a stateless secret.
+  assert.ok(html.includes('captchaId'), 'the page must carry the issued challenge id');
   rmSync(dir, { recursive: true, force: true });
 });
 
 test('loginPost rejects invalid CAPTCHA answer', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seros-login-badcaptcha-'));
+  const dbPath = join(dir, 'seros.db');
+  const previous = process.env.SEROS_DB;
+  process.env.SEROS_DB = dbPath;
+  migrateDb(dbPath);
   const { loginPost } = require('../src/routes/login');
   let redirectUrl = '';
   const res: any = {
@@ -53,17 +61,23 @@ test('loginPost rejects invalid CAPTCHA answer', async () => {
   };
 
   const req: any = {
+    ip: '127.0.0.1',
     body: {
       identifier: 'admin@example.com',
       password: 'password123',
       captchaAnswer: 'wrong-answer',
-      captchaSig: 'invalid-sig',
-      captchaTs: Date.now()
+      captchaId: 'nonexistent-challenge-id'
     }
   };
 
-  await loginPost(req, res);
+  try {
+    await loginPost(req, res);
+  } finally {
+    if (previous === undefined) delete process.env.SEROS_DB;
+    else process.env.SEROS_DB = previous;
+  }
   assert.equal(redirectUrl, '/login?err=captcha_failed');
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('loginPost accepts valid CAPTCHA answer structure', async () => {
@@ -74,7 +88,7 @@ test('loginPost accepts valid CAPTCHA answer structure', async () => {
   const previousDb = process.env.SEROS_DB;
   process.env.SEROS_DB = dbPath;
   migrateDb(dbPath);
-  const c = generateCaptcha();
+  const c = await issueCaptcha(openDb(dbPath), 'login', '127.0.0.1');
   const answer = String(c.num1 + c.num2);
   const { loginPost } = require('../src/routes/login');
   let redirectUrl = '';
@@ -86,9 +100,9 @@ test('loginPost accepts valid CAPTCHA answer structure', async () => {
     redirect: (code: number, url: string) => { redirectUrl = url; return res; }
   };
   try {
-    await loginPost({ body: {
+    await loginPost({ ip: '127.0.0.1', body: {
       identifier: 'nonexistent-user@example.com', password: 'password123',
-      captchaAnswer: answer, captchaSig: c.sig, captchaTs: c.ts,
+      captchaAnswer: answer, captchaId: c.id,
     } } as any, res);
     // CAPTCHA passed, so it proceeds to credentials check and denies invalid user safely.
     assert.ok(responseHtml.includes('Sign-in failed') || redirectUrl.includes('/login'));
@@ -109,7 +123,7 @@ test('loginPost cannot provision an absent workspace', async () => {
   migrateDb(dbPath);
 
   try {
-    const c = generateCaptcha();
+    const c = await issueCaptcha(openDb(dbPath), 'login', '127.0.0.1');
     let status = 200;
     let html = '';
     const res: any = {
@@ -119,9 +133,9 @@ test('loginPost cannot provision an absent workspace', async () => {
       redirect: () => { throw new Error('an absent workspace must not sign in'); },
     };
     const { loginPost } = require('../src/routes/login');
-    await loginPost({ body: {
+    await loginPost({ ip: '127.0.0.1', body: {
       identifier: 'admin@seros.dev', password: 'password123',
-      captchaAnswer: String(c.num1 + c.num2), captchaSig: c.sig, captchaTs: c.ts,
+      captchaAnswer: String(c.num1 + c.num2), captchaId: c.id,
     } } as any, res);
 
     assert.equal(status, 401);
@@ -159,7 +173,7 @@ test('signup creates a separate workspace owner and a signed-in session', async 
   process.env.SEROS_DB = dbPath;
   migrateDb(dbPath);
   const { signupPost } = require('../src/routes/login');
-  const c = generateCaptcha();
+  const c = await issueCaptcha(openDb(dbPath), 'signup', '127.0.0.1');
   let redirectUrl = '';
   let cookie = '';
   const res: any = {
@@ -167,10 +181,10 @@ test('signup creates a separate workspace owner and a signed-in session', async 
     setHeader: (name: string, value: string) => { if (name === 'Set-Cookie') cookie = value; return res; },
   };
   try {
-    await signupPost({ body: {
+    await signupPost({ ip: '127.0.0.1', body: {
       name: 'New Owner', workspace: 'New Workspace', email: 'owner@example.com',
       password: 'correct horse battery staple',
-      captchaAnswer: String(c.num1 + c.num2), captchaSig: c.sig, captchaTs: c.ts,
+      captchaAnswer: String(c.num1 + c.num2), captchaId: c.id,
     } } as any, res);
     assert.match(redirectUrl, /^\/queue\?msg=/);
     assert.match(cookie, /seros_session=/);
@@ -207,27 +221,27 @@ test('a self-created owner can sign in by email after the signup session ends', 
   process.env.SEROS_DB = dbPath;
   migrateDb(dbPath);
   const { signupPost, loginPost } = require('../src/routes/login');
-  const signupCaptcha = generateCaptcha();
+  const signupCaptcha = await issueCaptcha(openDb(dbPath), 'signup', '127.0.0.1');
   const signupRes: any = {
     redirect: () => signupRes,
     setHeader: () => signupRes,
   };
   try {
-    await signupPost({ body: {
+    await signupPost({ ip: '127.0.0.1', body: {
       name: 'Returning Owner', workspace: 'Returning Workspace', email: 'returning@example.com',
       password: 'correct horse battery staple',
-      captchaAnswer: String(signupCaptcha.num1 + signupCaptcha.num2), captchaSig: signupCaptcha.sig, captchaTs: signupCaptcha.ts,
+      captchaAnswer: String(signupCaptcha.num1 + signupCaptcha.num2), captchaId: signupCaptcha.id,
     } } as any, signupRes);
-    const loginCaptcha = generateCaptcha();
+    const loginCaptcha = await issueCaptcha(openDb(dbPath), 'login', '127.0.0.1');
     let redirectUrl = '';
     let cookie = '';
     const loginRes: any = {
       redirect: (_code: number, url: string) => { redirectUrl = url; return loginRes; },
       setHeader: (name: string, value: string) => { if (name === 'Set-Cookie') cookie = value; return loginRes; },
     };
-    await loginPost({ body: {
+    await loginPost({ ip: '127.0.0.1', body: {
       identifier: 'returning@example.com', password: 'correct horse battery staple',
-      captchaAnswer: String(loginCaptcha.num1 + loginCaptcha.num2), captchaSig: loginCaptcha.sig, captchaTs: loginCaptcha.ts,
+      captchaAnswer: String(loginCaptcha.num1 + loginCaptcha.num2), captchaId: loginCaptcha.id,
     } } as any, loginRes);
     assert.equal(redirectUrl, '/queue');
     assert.match(cookie, /seros_session=/);
@@ -238,10 +252,21 @@ test('a self-created owner can sign in by email after the signup session ends', 
   }
 });
 
-test('signup rejects an invalid CAPTCHA before opening a database', async () => {
+test('signup rejects an invalid CAPTCHA before creating a workspace', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seros-signup-badcaptcha-'));
+  const dbPath = join(dir, 'seros.db');
+  const previous = process.env.SEROS_DB;
+  process.env.SEROS_DB = dbPath;
+  migrateDb(dbPath);
   const { signupPost } = require('../src/routes/login');
   let redirectUrl = '';
   const res: any = { redirect: (_code: number, url: string) => { redirectUrl = url; return res; } };
-  await signupPost({ body: { captchaAnswer: 'no', captchaSig: 'bad', captchaTs: Date.now() } } as any, res);
+  try {
+    await signupPost({ ip: '127.0.0.1', body: { captchaAnswer: 'no', captchaId: 'nonexistent' } } as any, res);
+  } finally {
+    if (previous === undefined) delete process.env.SEROS_DB;
+    else process.env.SEROS_DB = previous;
+  }
   assert.match(redirectUrl, /^\/signup\?err=/);
+  rmSync(dir, { recursive: true, force: true });
 });

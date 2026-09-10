@@ -5,7 +5,7 @@
  * Exits non-zero if any workspace still has rows past its window (invariant 24: alert).
  */
 import { migrateDbAsync, openDb } from './db/client';
-import { sweepAllWorkspaces } from './retention';
+import { sweepAllWorkspaces, sweepSecurityControls } from './retention';
 
 async function main() {
   await migrateDbAsync();
@@ -23,6 +23,13 @@ async function main() {
       rows_past_window_after: r.rowsPastWindowAfterSweep,
     }));
   }
+  // Pre-authentication security controls belong to no workspace, so they are swept once
+  // for the whole deployment rather than per tenant.
+  const controls = await sweepSecurityControls(db);
+  console.log(JSON.stringify({
+    captcha_challenges_deleted: controls.captchaChallengesDeleted,
+    rate_limit_windows_deleted: controls.rateLimitWindowsDeleted,
+  }));
   console.log(JSON.stringify({ workspaces_swept: results.length, rows_past_window_after: stragglers }));
   if (stragglers > 0) process.exitCode = 1;
 }

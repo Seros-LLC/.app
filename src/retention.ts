@@ -333,6 +333,48 @@ export async function sweepAllWorkspaces(db: Db, opts: SweepOptions = {}): Promi
   return out;
 }
 
+/**
+ * Security-control rows are not workspace-owned: they are written before anyone is
+ * authenticated, so no per-workspace sweep can reach them. Left alone they grow without
+ * bound (a row per rendered sign-in page, a row per rate-limit window per client) and
+ * keep hashed client addresses long after they can serve any purpose.
+ *
+ * A challenge is useless once expired, and a rate-limit window is useless once it has
+ * closed, so both are deleted a grace period past their own end rather than on a
+ * content-retention policy.
+ */
+export const SECURITY_CONTROL_GRACE_MS = 24 * 60 * 60 * 1000;
+
+export interface SecurityControlSweepResult {
+  captchaChallengesDeleted: number;
+  rateLimitWindowsDeleted: number;
+  sweptAt: number;
+}
+
+export async function sweepSecurityControls(db: Db, opts: SweepOptions = {}): Promise<SecurityControlSweepResult> {
+  const now = opts.now ?? Date.now();
+  const cutoff = now - SECURITY_CONTROL_GRACE_MS;
+  const isPg = dialect() === 'pg';
+
+  const captchaQuery = sql`DELETE FROM captcha_challenges WHERE expires_at <= ${cutoff}`;
+  const windowQuery = sql`DELETE FROM rate_limit_windows WHERE window_start <= ${cutoff}`;
+
+  const run = async (query: ReturnType<typeof sql>): Promise<number> => {
+    if (isPg) {
+      const res: any = await (db as any).execute(query);
+      return Number(res?.rowCount ?? res?.rows?.length ?? 0);
+    }
+    const res: any = db.run(query);
+    return Number(res?.changes ?? 0);
+  };
+
+  return {
+    captchaChallengesDeleted: await run(captchaQuery),
+    rateLimitWindowsDeleted: await run(windowQuery),
+    sweptAt: now,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // connections + disconnect (invariant 25)
 // ---------------------------------------------------------------------------

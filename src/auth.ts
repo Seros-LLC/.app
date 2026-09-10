@@ -18,6 +18,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type * as expressSession from 'express-session';
 import { openDb } from './db/client';
 import { MemberCredentials } from './password';
+import { admitRateLimit } from './security-controls';
 import { errorPage } from './views';
 
 export const sessionSecret = () => {
@@ -243,47 +244,28 @@ export function requireCsrf(req: Request, res: Response, next: NextFunction) {
  * verifying a scrypt record. Do not add a second one.
  */
 
-/** Crude but real: a fixed-window limiter, per IP, per bucket. */
-const buckets = new Map<string, { n: number; resetAt: number }>();
-/** Test support only: no route reaches this, and it clears counters rather than raising them. */
-export function resetRateLimits() { buckets.clear(); }
+/** Durable fixed-window limiter, shared by all application instances. */
 export function rateLimit(name: string, max: number, windowMs: number) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const key = `${name}:${req.ip}`;
-    const now = Date.now();
-    const b = buckets.get(key);
-    if (!b || now > b.resetAt) { buckets.set(key, { n: 1, resetAt: now + windowMs }); return next(); }
-    if (b.n >= max) {
-      const secs = Math.ceil((b.resetAt - now) / 1000);
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const admission = await admitRateLimit(openDb(), name, req.ip ?? '', max, windowMs);
+      if (admission.admitted) return next();
+      const secs = Math.max(1, Math.ceil((admission.resetAt - Date.now()) / 1000));
       res.setHeader('Retry-After', String(secs));
       console.log(JSON.stringify({ level: 'warn', event: 'ratelimit.blocked', bucket: name }));
-      // The header already said when to retry; the page now says it too, because a
-      // person cannot read a response header.
-      const wait = secs <= 60
-        ? `${secs} second${secs === 1 ? '' : 's'}`
-        : `${Math.ceil(secs / 60)} minute${Math.ceil(secs / 60) === 1 ? '' : 's'}`;
+      const wait = secs <= 60 ? `${secs} second${secs === 1 ? '' : 's'}` : `${Math.ceil(secs / 60)} minute${Math.ceil(secs / 60) === 1 ? '' : 's'}`;
       const back = returnPathFor(req);
-      // A limiter in front of sign-in runs before there is any session, so the page
-      // uses the signed-out chrome rather than an application header the visitor
-      // cannot use yet.
       const signedOut = SIGNED_OUT.has(back);
       return res.status(429).type('html').send(errorPage(429,
         'Too many requests in a short time, so this one was not carried out',
         `Wait about ${wait}, then try again. This limit protects the workspace; nothing you sent was saved or lost.`,
-        {
-          title: 'Please wait',
-          active: signedOut ? '' : back,
-          ctx: signedOut ? { chrome: 'auth' } : {},
-          actions: signedOut
-            ? [{ href: back, label: back === '/signup' ? 'Back to sign up' : 'Back to sign in', primary: true }]
-            : [
-                { href: back, label: 'Back to the page', primary: true },
-                { href: '/queue', label: 'Go to the queue' },
-              ],
+        { title: 'Please wait', active: signedOut ? '' : back, ctx: signedOut ? { chrome: 'auth' } : {},
+          actions: signedOut ? [{ href: back, label: back === '/signup' ? 'Back to sign up' : 'Back to sign in', primary: true }]
+            : [{ href: back, label: 'Back to the page', primary: true }, { href: '/queue', label: 'Go to the queue' }],
         }));
+    } catch {
+      return res.status(503).type('html').send(errorPage(503, 'Protection service unavailable', 'Please try again shortly. Nothing you sent was saved.', { title: 'Try again' }));
     }
-    b.n++;
-    next();
   };
 }
 

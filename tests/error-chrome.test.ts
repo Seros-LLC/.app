@@ -30,7 +30,7 @@ process.env.SEROS_SLACK = 'fake';
 
 import { openDb, migrateDbAsync } from '../src/db/client';
 import { WorkspaceScope } from '../src/db/scope';
-import { csrfToken, requireCsrf, rateLimit, resetRateLimits, type Session } from '../src/auth';
+import { csrfToken, requireCsrf, rateLimit, type Session } from '../src/auth';
 import { confirmHandler } from '../src/routes/confirm';
 import { connectPage, channelsSave, disconnect } from '../src/routes/connect';
 import { askPage, askPost } from '../src/routes/ask';
@@ -207,18 +207,17 @@ test('a POST with no session is still 401, and now a signed-out page', async () 
 
 test('a rate-limited request is still 429, keeps Retry-After, and says when to retry', async () => {
   await fresh('ratelimit');
-  resetRateLimits();
   const limiter = rateLimit('chrome-test', 1, 45_000);
   const req = { ip: '10.0.0.9', path: '/confirm', body: {} } as any;
 
   const first = response();
   let allowed = false;
-  limiter(req, first.res, () => { allowed = true; });
+  await limiter(req, first.res, () => { allowed = true; });
   assert.equal(allowed, true, 'the first request is inside the window');
 
   const blocked = response();
   let secondAllowed = false;
-  limiter(req, blocked.res, () => { secondAllowed = true; });
+  await limiter(req, blocked.res, () => { secondAllowed = true; });
 
   assert.equal(secondAllowed, false, 'the limit is still enforced');
   assert.equal(blocked.status, 429, 'the status is unchanged');
@@ -226,24 +225,21 @@ test('a rate-limited request is still 429, keeps Retry-After, and says when to r
   assertErrorPage(blocked.body, 'rate limit');
   assert.match(blocked.body, /Wait about \d+ (second|minute)s?/, 'the wait is stated in the page, not only in a header');
   assert.ok(!blocked.body.includes('too many requests'), 'the bare string is gone');
-  resetRateLimits();
 });
 
 test('a rate-limited sign-in uses the signed-out chrome, not an unusable app header', async () => {
   await fresh('ratelimit-login');
-  resetRateLimits();
   const limiter = rateLimit('chrome-login', 1, 30_000);
   const req = { ip: '10.0.0.10', path: '/login', body: {} } as any;
-  limiter(req, response().res, () => {});
+  await limiter(req, response().res, () => {});
   const blocked = response();
-  limiter(req, blocked.res, () => { assert.fail('the limit must still block'); });
+  await limiter(req, blocked.res, () => { assert.fail('the limit must still block'); });
 
   assert.equal(blocked.status, 429);
   assert.match(blocked.body, /role="alert"/);
   assert.match(blocked.body, /href="\/login"/);
   assert.ok(!blocked.body.includes('href="/queue"'),
     'a visitor who is not signed in is not sent to a page they cannot open');
-  resetRateLimits();
 });
 
 test('a malformed review is still 400, and now names the fields to fix', async () => {

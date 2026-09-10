@@ -25,7 +25,7 @@ import {
   passwordMinLength, newInviteToken, normaliseEmail, lockoutPolicy, inviteTtlMs,
 } from '../password';
 import { page, esc, notice } from '../views';
-import { generateCaptcha, verifyCaptcha } from '../captcha';
+import { issueCaptcha, consumeCaptcha } from '../captcha';
 import type { PageContext } from '../views';
 
 const WS = () => process.env.SEROS_WORKSPACE || 'demo';
@@ -66,7 +66,7 @@ const flash = (req: Request, key: string) =>
 export async function loginPage(req: Request, res: Response) {
   const err = flash(req, 'err');
   const msg = flash(req, 'msg');
-  const captcha = generateCaptcha();
+  const captcha = await issueCaptcha(openDb(), 'login', req.ip ?? '');
 
   // Every failure the visitor can cause says the same sentence (see DENIED).
   // The two that are OUR fault, not theirs, are named plainly, because telling a
@@ -106,8 +106,7 @@ export async function loginPage(req: Request, res: Response) {
         <input id="captchaAnswer" type="text" name="captchaAnswer" inputmode="numeric"
                placeholder="Answer" required autocomplete="off" aria-describedby="cap-help">
       </div>
-      <input type="hidden" name="captchaSig" value="${esc(captcha.sig)}">
-      <input type="hidden" name="captchaTs" value="${captcha.ts}">
+      <input type="hidden" name="captchaId" value="${esc(captcha.id)}">
     </div>
     <p class="meta" id="cap-help">The challenge expires after a few minutes. A new one loads with the page.</p>
 
@@ -137,7 +136,7 @@ export async function loginPage(req: Request, res: Response) {
 
 export async function signupPage(req: Request, res: Response) {
   const err = flash(req, 'err');
-  const captcha = generateCaptcha();
+  const captcha = await issueCaptcha(openDb(), 'signup', req.ip ?? '');
   const body = `<h1>Create your workspace</h1>
   <p class="sub">Start with one owner. You can invite your team after you sign in.</p>
   ${err ? notice('bad', 'We could not create that account', err) : ''}
@@ -162,8 +161,7 @@ export async function signupPage(req: Request, res: Response) {
         ${captcha.svg}
         <input id="captchaAnswer" type="text" name="captchaAnswer" inputmode="numeric" placeholder="Answer" required autocomplete="off">
       </div>
-      <input type="hidden" name="captchaSig" value="${esc(captcha.sig)}">
-      <input type="hidden" name="captchaTs" value="${captcha.ts}">
+      <input type="hidden" name="captchaId" value="${esc(captcha.id)}">
     </div>
     <div class="row"><button class="primary" type="submit">Create account &rarr;</button></div>
   </form>
@@ -173,9 +171,8 @@ export async function signupPage(req: Request, res: Response) {
 
 export async function signupPost(req: Request, res: Response) {
   const captchaAnswer = String(req.body?.captchaAnswer ?? '');
-  const captchaSig = String(req.body?.captchaSig ?? '');
-  const captchaTs = Number(req.body?.captchaTs ?? 0);
-  if (!verifyCaptcha(captchaAnswer, captchaSig, captchaTs)) {
+  const captchaId = String(req.body?.captchaId ?? '');
+  if (!(await consumeCaptcha(openDb(), captchaId, captchaAnswer, 'signup', req.ip ?? ''))) {
     return res.redirect(303, '/signup?err=' + encodeURIComponent('That verification did not go through. Try the new challenge.'));
   }
 
@@ -216,10 +213,9 @@ export async function signupPost(req: Request, res: Response) {
 
 export async function loginPost(req: Request, res: Response) {
   const captchaAnswer = String(req.body?.captchaAnswer ?? '');
-  const captchaSig = String(req.body?.captchaSig ?? '');
-  const captchaTs = Number(req.body?.captchaTs ?? 0);
+  const captchaId = String(req.body?.captchaId ?? '');
 
-  if (!verifyCaptcha(captchaAnswer, captchaSig, captchaTs)) {
+  if (!(await consumeCaptcha(openDb(), captchaId, captchaAnswer, 'login', req.ip ?? ''))) {
     return res.redirect(303, '/login?err=captcha_failed');
   }
 
@@ -238,7 +234,7 @@ export async function loginPost(req: Request, res: Response) {
     scope = await WorkspaceScope.open(db, workspaceId);
   } catch {
     await verifyPassword(password, null);
-    return deny(res, null, null, 'unknown_identifier');
+    return deny(req, res, null, null, 'unknown_identifier');
   }
   const creds = MemberCredentials.for(db, scope);
   const now = Date.now();
@@ -248,14 +244,14 @@ export async function loginPost(req: Request, res: Response) {
   if (!member || member.status !== 'active') {
     // Pay for a hash we will not use, so "no such member" costs what "wrong password" costs.
     await verifyPassword(password, null);
-    return deny(res, scope, member?.id ?? null, member ? 'not_active' : 'unknown_identifier');
+    return deny(req, res, scope, member?.id ?? null, member ? 'not_active' : 'unknown_identifier');
   }
 
   const row = await creds.get(member.id);
 
   if (row?.lockedUntil && row.lockedUntil > now) {
     await verifyPassword(password, null);                     // the lock is not a shortcut
-    return deny(res, scope, member.id, 'locked');
+    return deny(req, res, scope, member.id, 'locked');
   }
 
   // A member without a credential cannot sign in AT ALL: not with an empty password,
@@ -263,13 +259,13 @@ export async function loginPost(req: Request, res: Response) {
   // any way. The only cure is an invite or the CLI, both of which need the host.
   if (!row?.passwordHash) {
     await verifyPassword(password, null);
-    return deny(res, scope, member.id, 'no_password');
+    return deny(req, res, scope, member.id, 'no_password');
   }
 
   if (!(await verifyPassword(password, row.passwordHash))) {
     const after = await creds.recordFailure(member.id, now);
     const locked = !!after?.lockedUntil && after.lockedUntil > now;
-    return deny(res, scope, member.id, locked ? 'locked' : 'bad_password', after?.failedAttempts ?? 0);
+    return deny(req, res, scope, member.id, locked ? 'locked' : 'bad_password', after?.failedAttempts ?? 0);
   }
 
   // Correct. Upgrade the stored parameters if they have moved on; this does NOT
@@ -291,7 +287,7 @@ export async function loginPost(req: Request, res: Response) {
 }
 
 /** Identical body, identical status, for every reason. The reason goes to the audit log. */
-async function deny(res: Response, scope: WorkspaceScope | null, memberId: string | null, reason: Reason, attempts = 0) {
+async function deny(req: Request, res: Response, scope: WorkspaceScope | null, memberId: string | null, reason: Reason, attempts = 0) {
   if (scope) {
     // awaited: on Postgres this insert is a promise, and a denial nobody waits for
     // is a failed sign-in that never reaches the audit log.
@@ -301,7 +297,7 @@ async function deny(res: Response, scope: WorkspaceScope | null, memberId: strin
   }
   // A 401 cannot redirect, so the form is rendered again here. It carries a fresh
   // CAPTCHA, because the one the visitor just used has now been spent.
-  const captcha = generateCaptcha();
+  const captcha = await issueCaptcha(openDb(), 'login', req.ip ?? '');
   const body = `<h1>Sign in</h1>
   <p class="sub">Seros drafts the work; you confirm it.</p>
   ${notice('bad', 'Sign-in failed', DENIED_HELP)}
@@ -318,8 +314,7 @@ async function deny(res: Response, scope: WorkspaceScope | null, memberId: strin
         <input id="captchaAnswer" type="text" name="captchaAnswer" inputmode="numeric"
                placeholder="Answer" required autocomplete="off">
       </div>
-      <input type="hidden" name="captchaSig" value="${esc(captcha.sig)}">
-      <input type="hidden" name="captchaTs" value="${captcha.ts}">
+      <input type="hidden" name="captchaId" value="${esc(captcha.id)}">
     </div>
     <div class="row"><button class="primary" type="submit">Sign in &rarr;</button></div>
   </form>`;
