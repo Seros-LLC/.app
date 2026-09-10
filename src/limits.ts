@@ -42,7 +42,7 @@
 
 import { and, eq, inArray, lte, sql } from 'drizzle-orm';
 import type { openDb } from './db/client';
-import { dialect } from './db/client';
+import { dialect, resultRows } from './db/client';
 import { WorkspaceScope } from './db/scope';
 import { drafts, jobs, workspaces } from './db/schema';
 import { DAY_MS } from './retention';
@@ -291,8 +291,7 @@ export async function draftsHaveExpiresAt(db: Db): Promise<boolean> {
     const res: any = await (db as any).execute(sql`
       SELECT column_name FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'drafts' AND column_name = 'expires_at'`);
-    const rows: any[] = res?.rows ?? res ?? [];
-    return rows.length > 0;
+    return resultRows(res).length > 0;
   }
   const cols = db.all(sql`PRAGMA table_info(drafts)`) as unknown as ColumnInfo[];
   return cols.some((c) => c.name === 'expires_at');

@@ -88,13 +88,16 @@ function staleQuery(cutoff: number) {
  * node-postgres driver, whose query builders are promises. Rather than return a
  * silently-unawaited promise (a job claimed by nobody, a retry that never lands),
  * the SQLite-only entry points say so precisely and name their replacement.
+ *
+ * src/worker.ts and src/routes/cron.ts both use the *Async forms already, so
+ * nothing in the app reaches these; they remain for SQLite-only callers and
+ * tests. Keep it that way — a synchronous call added here would throw on the
+ * only dialect production runs.
  */
 function assertSqliteSync(fn: string): void {
   if (dialect() === 'pg') {
     throw new Error(
-      `${fn}() is synchronous and works on SQLite only; on Postgres call ${fn}Async(). ` +
-      `src/worker.ts calls the synchronous form and must be switched over before ` +
-      `DATABASE_URL may point at Postgres.`,
+      `${fn}() is synchronous and works on SQLite only; on Postgres call ${fn}Async().`,
     );
   }
 }

@@ -38,6 +38,7 @@ import { migrateDbAsync, openDb, closeDb, dialect } from '../src/db/client';
 import { admitRateLimit } from '../src/security-controls';
 import { issueCaptcha, consumeCaptcha } from '../src/captcha';
 import { claimNextJobAsync, reapStaleJobsAsync } from '../src/db/system';
+import { ensureRetentionSchema, sweepSecurityControls } from '../src/retention';
 import { WorkspaceScope } from '../src/db/scope';
 
 let ready: Promise<void> | null = null;
@@ -124,6 +125,27 @@ test('reaping stale jobs returns a count rather than throwing, on Postgres', { s
   const reaped = await reapStaleJobsAsync(db);
   assert.equal(typeof reaped, 'number',
     'the cron endpoint calls this first: if it throws, the queue never drains');
+});
+
+test('the retention schema check is idempotent, on Postgres', { skip }, async () => {
+  const db = await withDb();
+
+  // First call may legitimately relax the column; the SECOND must report that
+  // there was nothing left to do. A camelCase key misread here reports a change
+  // on every boot and re-issues the ALTER for ever.
+  await ensureRetentionSchema(db);
+  const second = await ensureRetentionSchema(db);
+
+  assert.equal(second.bodyMadeNullable, false,
+    'a settled schema must report no change on the next call');
+});
+
+test('sweeping pre-authentication security controls reports a count, on Postgres', { skip }, async () => {
+  const db = await withDb();
+  const swept = await sweepSecurityControls(db);
+
+  assert.equal(typeof swept.captchaChallengesDeleted, 'number');
+  assert.equal(typeof swept.rateLimitWindowsDeleted, 'number');
 });
 
 test.after(async () => { await closeDb(); });

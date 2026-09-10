@@ -38,7 +38,7 @@ import { and, eq, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
 import { randomUUID } from 'node:crypto';
 import type { openDb } from './db/client';
-import { dialect } from './db/client';
+import { dialect, resultRows, affectedRows } from './db/client';
 import { WorkspaceScope } from './db/scope';
 import {
   workspaces, members, drafts, confirmations, tasks, jobs, auditEvents, actionMeter,
@@ -208,8 +208,13 @@ async function ensureRetentionSchemaPg(db: Db): Promise<{ bodyMadeNullable: bool
     `SELECT is_nullable FROM information_schema.columns
       WHERE table_schema = current_schema() AND table_name = 'source_messages' AND column_name = 'body'`,
   );
-  const rows: any[] = res?.rows ?? res ?? [];
-  if (rows.length === 0 || rows[0].is_nullable === 'YES') return { bodyMadeNullable: false };
+  // `transform: postgres.camel` renames this to `isNullable` on the way out, so
+  // reading only `is_nullable` yields undefined, never matches 'YES', and sends
+  // every call down the ALTER path — redundant DDL on each boot, and a return
+  // value claiming a change that did not happen.
+  const rows = resultRows(res);
+  const nullable = rows[0]?.is_nullable ?? rows[0]?.isNullable;
+  if (rows.length === 0 || nullable === 'YES') return { bodyMadeNullable: false };
   await exec('ALTER TABLE source_messages ALTER COLUMN body DROP NOT NULL');
   return { bodyMadeNullable: true };
 }
@@ -360,12 +365,8 @@ export async function sweepSecurityControls(db: Db, opts: SweepOptions = {}): Pr
   const windowQuery = sql`DELETE FROM rate_limit_windows WHERE window_start <= ${cutoff}`;
 
   const run = async (query: ReturnType<typeof sql>): Promise<number> => {
-    if (isPg) {
-      const res: any = await (db as any).execute(query);
-      return Number(res?.rowCount ?? res?.rows?.length ?? 0);
-    }
-    const res: any = db.run(query);
-    return Number(res?.changes ?? 0);
+    if (isPg) return affectedRows(await (db as any).execute(query));
+    return affectedRows(db.run(query));
   };
 
   return {
