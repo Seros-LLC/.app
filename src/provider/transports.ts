@@ -177,6 +177,52 @@ async function callOpenAiCompatible(req: CompleteRequest, model: string, base: s
   } finally { clearTimeout(t); }
 }
 
+/**
+ * Can the hosted provider still authenticate us?
+ *
+ * This exists because a Google `AQ.` token is OAuth-issued and expires on its
+ * own schedule. When it did, every draft failed with `provider_error`, the
+ * failure went to a log line nobody reads, and `/health` went on reporting
+ * `ok: true` — the app looked fine and quietly stopped doing its job. An
+ * expiring credential is not an outage the operator should have to infer from
+ * missing drafts.
+ *
+ * It lists models rather than completing a prompt: same credential, same
+ * origin, no tokens billed, so it is safe to call on a schedule. A network
+ * blip is not the same fact as a rejected key, so they are reported apart —
+ * `unreachable` is not actionable, `invalid` means go rotate the key.
+ */
+export type CredentialState = 'ok' | 'invalid' | 'unreachable' | 'unconfigured';
+
+export interface CredentialCheck {
+  state: CredentialState;
+  detail: string;
+}
+
+export async function checkHostedCredential(timeoutMs?: number): Promise<CredentialCheck> {
+  const base = process.env.SEROS_PROVIDER_BASE_URL;
+  const key = process.env.SEROS_PROVIDER_API_KEY;
+  if (!base || !key) return { state: 'unconfigured', detail: 'no hosted provider configured' };
+
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs ?? Number(process.env.SEROS_HEALTH_TIMEOUT_MS || 5000));
+  try {
+    const r = await fetch(`${base.replace(/\/$/, '')}/models`, {
+      method: 'GET', signal: ctl.signal, redirect: 'error',
+      headers: { authorization: 'Bearer ' + key },
+    });
+    // 401/403 is the credential being refused: expired, revoked, or wrong.
+    if (r.status === 401 || r.status === 403) {
+      return { state: 'invalid', detail: `provider rejected the credential (http ${r.status})` };
+    }
+    if (!r.ok) return { state: 'unreachable', detail: `provider returned http ${r.status}` };
+    return { state: 'ok', detail: 'credential accepted' };
+  } catch (e: any) {
+    const why = e?.name === 'AbortError' ? 'timed out' : String(e?.message ?? e);
+    return { state: 'unreachable', detail: `could not reach provider: ${why}` };
+  } finally { clearTimeout(t); }
+}
+
 export type TransportName = 'http' | 'ollama' | 'fake';
 
 export function transportChain(): TransportName[] {

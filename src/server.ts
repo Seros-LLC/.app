@@ -12,6 +12,7 @@ import {
 } from './routes/login';
 import { requireSession, requireCsrf, rateLimit, sessionSecret, asyncHandler } from './auth';
 import { cronDrain } from './routes/cron';
+import { checkHostedCredential } from './provider/transports';
 import { page, empty, notice } from './views';
 import { connectPage, connectStart, connectCallback, disconnect, channelsPage, channelsSave } from './routes/connect';
 import { WorkspaceScope } from './db/scope';
@@ -48,7 +49,19 @@ export function createApp() {
     next();
   });
 
-  app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+  // Two different questions, deliberately separate. The bare form answers "is
+  // this process up?" and stays cheap enough for an uptime pinger to hammer.
+  // `?deep=1` also asks the model provider whether our credential still works,
+  // which is the failure that used to be invisible: an expired key meant no
+  // drafts, and this endpoint cheerfully reported ok.
+  app.get('/health', asyncHandler(async (req, res) => {
+    if (req.query.deep !== '1') return res.json({ ok: true, ts: Date.now() });
+    const cred = await checkHostedCredential();
+    // An unreachable provider is not the app being broken, so it does not fail
+    // the check; a refused credential is, and needs someone to act.
+    const ok = cred.state !== 'invalid';
+    res.status(ok ? 200 : 503).json({ ok, ts: Date.now(), provider: cred });
+  }));
 
   // The scheduled worker, for serverless. Authorised by the platform's cron header
   // or a shared secret; never by a session, because no human drives it.
