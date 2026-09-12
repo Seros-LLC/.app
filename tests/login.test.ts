@@ -1,5 +1,5 @@
 /**
- * tests/login.test.ts - sign-in page, CAPTCHA enforcement, and OAuth integration.
+ * tests/login.test.ts - sign-in page and CAPTCHA enforcement.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,8 +38,11 @@ test('loginPage is render-only and does not publish a fixed owner credential', a
 
   assert.ok(html.includes('Sign in'));
   assert.ok(html.includes('captchaAnswer'));
-  assert.ok(html.includes('Sign in with Google'));
-  assert.ok(html.includes('Sign in with GitHub'));
+  // Password-only sign-in: no provider buttons, no provider routes.
+  assert.ok(!html.includes('Sign in with Google'));
+  assert.ok(!html.includes('Sign in with GitHub'));
+  assert.ok(!html.includes('/auth/google'));
+  assert.ok(!html.includes('/auth/github'));
   assert.ok(!html.includes('admin@seros.dev'));
   assert.ok(!html.includes('password123'));
   // The durable CAPTCHA records each issued challenge, so the sign-in page now

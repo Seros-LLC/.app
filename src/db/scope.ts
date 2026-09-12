@@ -24,7 +24,7 @@ import { affectedRows } from './client';
 import { withTx } from './tx';
 import {
   workspaces, members, memberCredentials, sourceMessages, drafts, confirmations, tasks,
-  auditEvents, actionMeter, jobs, draftReasons, taskWrites, oauthProviders,
+  auditEvents, actionMeter, jobs, draftReasons, taskWrites,
   sourceConnections, sourceChannels, confirmationEdits,
   DAY_MS, DEFAULT_DRAFT_TTL_DAYS,
 } from './schema';
@@ -517,41 +517,6 @@ export class WorkspaceScope {
     if (!ids.length) return;
     await this.db.update(sourceChannels).set({ selected: 1, selectedAt: now })
       .where(and(eq(sourceChannels.workspaceId, this.workspaceId), inArray(sourceChannels.channelId, ids)));
-  }
-
-  // ---------------------------------------------------------------------
-  // OAuth sign-in. These live here, and not in src/oauth.ts, for the reason
-  // tools/check-tenancy.ts exists: `members`, `member_credentials` and
-  // `oauth_providers` are tenant-owned, so the workspace id must be injected by
-  // the scope rather than passed in by a caller who might forget.
-  // ---------------------------------------------------------------------
-
-  /** Links a provider identity to a member. Repeat calls are a no-op. */
-  async linkOAuth(memberId: string, info: { provider: 'google' | 'github'; providerUserId: string; email: string | null; name: string | null }): Promise<void> {
-    await this.db.insert(oauthProviders).values({
-      workspaceId: this.workspaceId, memberId, provider: info.provider,
-      providerUserId: info.providerUserId, email: info.email ? normaliseEmail(info.email) : null,
-      name: info.name, createdAt: Date.now(),
-    }).onConflictDoNothing();
-  }
-
-  /** The member behind a provider identity, or undefined. */
-  async memberByOAuth(provider: 'google' | 'github', providerUserId: string) {
-    const link = (await this.db.select().from(oauthProviders).where(and(
-      eq(oauthProviders.workspaceId, this.workspaceId), eq(oauthProviders.provider, provider),
-      eq(oauthProviders.providerUserId, providerUserId))).limit(1))[0];
-    if (!link) return undefined;
-    const m = await this.member(link.memberId);
-    return m ? { memberId: link.memberId, member: m } : undefined;
-  }
-
-  /** The member linked to this email through any provider, or undefined. */
-  async memberIdByOAuthEmail(email: string): Promise<string | undefined> {
-    const norm = normaliseEmail(email);
-    if (!norm) return undefined;
-    const row = (await this.db.select().from(oauthProviders).where(and(
-      eq(oauthProviders.workspaceId, this.workspaceId), eq(oauthProviders.email, norm))).limit(1))[0];
-    return row?.memberId;
   }
 
   /** Session invalidation stamp: when the password was last set. */
