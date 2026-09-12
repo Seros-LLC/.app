@@ -93,26 +93,23 @@ npm start
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | Slack app credentials for the install flow | — |
 | `SEROS_ENCRYPTION_KEY` | 32 bytes (base64 or hex) sealing stored Slack tokens | **required to connect Slack** |
 | `SEROS_PUBLIC_URL` | Public base URL, for the OAuth redirect | request host |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth Web client credentials for sign-in | — |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app credentials for sign-in | — |
 
-### Google sign-in
+### Signing in
 
-Google sign-in is an alternate sign-in method, not an anonymous signup path. A Google
-account can sign in only when its email already belongs to an active member in the
-workspace; the provider identity is then linked to that member and recorded in the audit
-log.
+Sign-in is email and password only. There is no provider sign-in: a member
+receives an invite link, sets a password, and signs in with it. Passwords are
+scrypt-hashed, sign-in is rate-limited and locks out after repeated failures,
+and a CAPTCHA guards the form.
 
-Create a **Web application** OAuth client in Google Cloud and register this exact authorized
-redirect URI:
+Account recovery is deliberately manual, because a self-serve reset on a
+workspace this small is a larger attack surface than it is a convenience:
 
 ```
-https://app.seros.dev/oauth/callback?provider=google
+npm run invite        # issue an invite link for a new member
+npm run set-password  # set a password directly, for recovery
 ```
 
-Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as Vercel Production secrets. The app
-requests only `profile` and `email`, and fails closed to `/login` if the credentials are
-absent or Google does not authenticate an already-provisioned active member.
+Both need database access, so possession of the DB is the recovery factor.
 
 ### Connecting Slack, and what "we only read these" means
 
