@@ -29,7 +29,7 @@
  * src/limits-cli.ts. Every line is one JSON object.
  */
 import { migrateDbAsync, openDb } from './db/client';
-import { WorkspaceScope } from './db/scope';
+import { UnknownWorkspace, WorkspaceScope } from './db/scope';
 import { open as openSecret } from './crypto';
 import { slackClient } from './slack/client';
 import { complete, dbMeterContext, DetectionSchema } from './provider/index';
@@ -233,9 +233,27 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   if (report.detectorUnavailable > 0) process.exitCode = 1;
 }
 
+/**
+ * Turn a thrown error into something a founder can act on mid-call.
+ *
+ * `UnknownWorkspace` carries only the bare id as its message, which is right for
+ * a typed exception and useless as operator output: `{"error":"notaworkspace"}`
+ * gives no hint that the id was the problem. This runs in front of a prospect,
+ * so the failure has to name the cause and the next move.
+ */
+function explain(err: unknown): string {
+  if (err instanceof UnknownWorkspace) {
+    return `no workspace with id ${JSON.stringify(String(err.message))}. `
+      + 'Pass the workspace id (not its name or Slack team id) — list them with: '
+      + 'psql "$DATABASE_URL" -c "select id, name from workspaces"';
+  }
+  const msg = String((err as { message?: unknown })?.message ?? err);
+  return msg || 'replay failed with no error message';
+}
+
 if (require.main === module) {
   main().catch((err) => {
-    console.error(JSON.stringify({ level: 'error', event: 'replay.capture_failed', error: String(err?.message ?? err) }));
+    console.error(JSON.stringify({ level: 'error', event: 'replay.capture_failed', error: explain(err) }));
     process.exitCode = 1;
   });
 }
